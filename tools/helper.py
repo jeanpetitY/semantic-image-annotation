@@ -965,7 +965,7 @@ class Helper:
 
         return stats
 
-def main():
+def helper():
     helper = Helper()
     splitter = DatasetSplitter()
     balancer = DatasetBalancer()
@@ -1125,7 +1125,7 @@ def main():
 
 
 # if __name__ == "__main__":
-#     main()
+#     helper()
     
 
 helper = Helper()

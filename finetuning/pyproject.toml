@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-finetuning"
+version = "0.1.0"
+description = "Food image classification fine-tuning module."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "accelerate==1.11.0",
+    "datasets==4.3.0",
+    "dotenv==0.9.9",
+    "matplotlib>=3.10.9",
+    "numpy",
+    "pandas>=2.3.3",
+    "pillow==11.1.0",
+    "scikit-learn==1.6.1",
+    "seaborn>=0.13.2",
+    "torch==2.7.1",
+    "torchvision==0.22.1",
+    "transformers==4.57.1",
+]
+
+[project.scripts]
+food-finetune = "main:main"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "train_classifier",
+]

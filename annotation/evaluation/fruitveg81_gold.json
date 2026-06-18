@@ -1,0 +1,214 @@
+[
+  {
+    "food_class": "cabbage",
+    "expected_fdc_id": 169975
+  },
+  {
+    "food_class": "cherries",
+    "expected_fdc_id": 2709231
+  },
+  {
+    "food_class": "mangos",
+    "expected_fdc_id": 169910
+  },
+  {
+    "food_class": "clementines",
+    "expected_fdc_id": 168195
+  },
+  {
+    "food_class": "red_beet",
+    "expected_fdc_id": 2685576
+  },
+  {
+    "food_class": "oranges",
+    "expected_fdc_id": 2709171
+  },
+  {
+    "food_class": "carambolas",
+    "expected_fdc_id": 171715
+  },
+  {
+    "food_class": "damsons",
+    "expected_fdc_id": 2119551
+  },
+  {
+    "food_class": "kumquats",
+    "expected_fdc_id": 168154
+  },
+  {
+    "food_class": "apricots",
+    "expected_fdc_id": 171697
+  },
+  {
+    "food_class": "passion_fruits",
+    "expected_fdc_id": 2709248
+  },
+  {
+    "food_class": "herbs",
+    "expected_fdc_id": 2612311
+  },
+  {
+    "food_class": "melons",
+    "expected_fdc_id": 2709241
+  },
+  {
+    "food_class": "cauliflower",
+    "expected_fdc_id": 2685573
+  },
+  {
+    "food_class": "chanterelles",
+    "expected_fdc_id": 168422
+  },
+  {
+    "food_class": "celeries",
+    "expected_fdc_id": 2709778
+  },
+  {
+    "food_class": "plums",
+    "expected_fdc_id": 169949
+  },
+  {
+    "food_class": "gingers",
+    "expected_fdc_id": 169231
+  },
+  {
+    "food_class": "pitayas",
+    "expected_fdc_id": 2709234
+  },
+  {
+    "food_class": "grapes",
+    "expected_fdc_id": 2709237
+  },
+  {
+    "food_class": "potatoes",
+    "expected_fdc_id": 170032
+  },
+  {
+    "food_class": "pomegranates",
+    "expected_fdc_id": 169134
+  },
+  {
+    "food_class": "beans",
+    "expected_fdc_id": 2709769
+  },
+  {
+    "food_class": "pineapples",
+    "expected_fdc_id": 2709260
+  },
+  {
+    "food_class": "grapefruits",
+    "expected_fdc_id": 2709165
+  },
+  {
+    "food_class": "carrots",
+    "expected_fdc_id": 2709660
+  },
+  {
+    "food_class": "pumpkins",
+    "expected_fdc_id": 168448
+  },
+  {
+    "food_class": "limes",
+    "expected_fdc_id": 168155
+  },
+  {
+    "food_class": "eggplants",
+    "expected_fdc_id": 2709785
+  },
+  {
+    "food_class": "apples",
+    "expected_fdc_id": 2709215
+  },
+  {
+    "food_class": "fennels",
+    "expected_fdc_id": 2709779
+  },
+  {
+    "food_class": "onions",
+    "expected_fdc_id": 2709795
+  },
+  {
+    "food_class": "zucchinis",
+    "expected_fdc_id": 168565
+  },
+  {
+    "food_class": "coconuts",
+    "expected_fdc_id": 170169
+  },
+  {
+    "food_class": "turnips",
+    "expected_fdc_id": 170465
+  },
+  {
+    "food_class": "leeks",
+    "expected_fdc_id": 2709935
+  },
+  {
+    "food_class": "pears",
+    "expected_fdc_id": 169118
+  },
+  {
+    "food_class": "kiwis",
+    "expected_fdc_id": 2709239
+  },
+  {
+    "food_class": "radishes",
+    "expected_fdc_id": 169276
+  },
+  {
+    "food_class": "lemons",
+    "expected_fdc_id": 2709168
+  },
+  {
+    "food_class": "mangosteens",
+    "expected_fdc_id": 169090
+  },
+  {
+    "food_class": "cucumbers",
+    "expected_fdc_id": 2709784
+  },
+  {
+    "food_class": "kiwanos",
+    "expected_fdc_id": 167791
+  },
+  {
+    "food_class": "salads",
+    "expected_fdc_id": 2401536
+  },
+  {
+    "food_class": "peppers",
+    "expected_fdc_id": 2709798
+  },
+  {
+    "food_class": "garlics",
+    "expected_fdc_id": 2709786
+  },
+  {
+    "food_class": "tamarillos",
+    "expected_fdc_id": 1906026
+  },
+  {
+    "food_class": "mushrooms",
+    "expected_fdc_id": 2709793
+  },
+  {
+    "food_class": "peaches",
+    "expected_fdc_id": 2709249
+  },
+  {
+    "food_class": "nectarines",
+    "expected_fdc_id": 169914
+  },
+  {
+    "food_class": "avocados",
+    "expected_fdc_id": 2709223
+  },
+  {
+    "food_class": "bananas",
+    "expected_fdc_id": 173944
+  },
+  {
+    "food_class": "tomatos",
+    "expected_fdc_id": 2709719
+  }
+]

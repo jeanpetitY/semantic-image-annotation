@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: image-annotation
+Version: 0.1.0
+Summary: Food annotation and USDA enrichment module.
+Requires-Python: <3.14,>=3.10
+Requires-Dist: accelerate>=1.13.0
+Requires-Dist: dotenv==0.9.9
+Requires-Dist: openai==1.76.0
+Requires-Dist: pydantic
+Requires-Dist: requests==2.32.5
+Requires-Dist: torch==2.7.1
+Requires-Dist: transformers==4.57.1

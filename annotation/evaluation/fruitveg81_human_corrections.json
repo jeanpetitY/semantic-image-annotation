@@ -1,0 +1,26 @@
+[
+  {
+    "food_class": "herbs",
+    "raw_fdc_id": 2709164,
+    "raw_usda_name": "Clementine, raw",
+    "corrected_fdc_id": 2612311,
+    "corrected_usda_name": "FRESH HERB BLEND, FRESH HERB",
+    "verification_source": "human_in_the_loop"
+  },
+  {
+    "food_class": "pitayas",
+    "raw_fdc_id": 2709164,
+    "raw_usda_name": "Clementine, raw",
+    "corrected_fdc_id": 2709234,
+    "corrected_usda_name": "Dragon fruit",
+    "verification_source": "human_in_the_loop"
+  },
+  {
+    "food_class": "salads",
+    "raw_fdc_id": 2709661,
+    "raw_usda_name": "Carrots, raw, salad",
+    "corrected_fdc_id": 2401536,
+    "corrected_usda_name": "SALAD",
+    "verification_source": "human_in_the_loop"
+  }
+]

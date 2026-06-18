@@ -1,0 +1,10 @@
+README.md
+main.py
+pyproject.toml
+train_classifier.py
+food_finetuning.egg-info/PKG-INFO
+food_finetuning.egg-info/SOURCES.txt
+food_finetuning.egg-info/dependency_links.txt
+food_finetuning.egg-info/entry_points.txt
+food_finetuning.egg-info/requires.txt
+food_finetuning.egg-info/top_level.txt

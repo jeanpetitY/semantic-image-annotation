@@ -348,6 +348,6 @@ def fetch_and_stream_foods(limit=None):
 
 
 if __name__ == "__main__":
-    print("Fetching USDA food data from ORKG...")
+    print("Fetching food data from ORKG...")
     fetch_foods_by_resource_ids(resource_ids)
     # fetch_and_stream_foods(limit=None)

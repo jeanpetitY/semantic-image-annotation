@@ -1,0 +1,12 @@
+README.md
+apply_corrections.py
+evaluation.py
+get_from_usda.py
+main.py
+pyproject.toml
+image_annotation.egg-info/PKG-INFO
+image_annotation.egg-info/SOURCES.txt
+image_annotation.egg-info/dependency_links.txt
+image_annotation.egg-info/entry_points.txt
+image_annotation.egg-info/requires.txt
+image_annotation.egg-info/top_level.txt

@@ -1,111 +1,13 @@
-import torch
-import re
-from difflib import SequenceMatcher
-from PIL import Image
-from io import BytesIO
-from tqdm import tqdm
-from datasets import load_dataset
-from sklearn.metrics import accuracy_score, f1_score
 import json
 import os
+import sys
+from pathlib import Path
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-
-
-class FoodClassifier:
-    def __init__(self, model_dir: str):
-        from transformers import AutoImageProcessor, AutoModelForImageClassification
-
-        self.model = AutoModelForImageClassification.from_pretrained(
-            model_dir
-        ).to(device)
-
-        self.processor = AutoImageProcessor.from_pretrained(model_dir)
-
-        self.id2label = self.model.config.id2label
-
-    # ------------------ Utils ------------------
-
-    def clean_label(self, name: str) -> str:
-        name = name.lower().strip()
-        name = name.replace("&", "and")
-        name = re.sub(r"[ \-_/']", "_", name)
-        name = re.sub(r"[^a-z0-9_]", "", name)
-        name = re.sub(r"_+", "_", name)
-
-        return name.strip("_")
-
-    def token_overlap(self, a: str, b: str) -> float:
-        ta = a.split("_")
-        tb = b.split("_")
-
-        if len(ta) == 1 and len(tb) == 1:
-            return SequenceMatcher(None, ta[0], tb[0]).ratio()
-
-        if len(ta) != len(tb):
-            return 0.0
-
-        return 0.0
-
-    def labels_semantically_equal(
-        self,
-        y_true: str,
-        y_pred: str,
-        threshold: float = 0.85,
-    ) -> bool:
-
-        a = self.clean_label(y_true)
-        b = self.clean_label(y_pred)
-
-        if a == b:
-            return True
-
-        ratio = SequenceMatcher(None, a, b).ratio()
-        if ratio < threshold:
-            return False
-
-        overlap = self.token_overlap(a, b)
-        if overlap < threshold:
-            return False
-
-        return True
-
-    # ------------------ Prediction ------------------
-
-    def _load_image(self, image_source):
-
-        if isinstance(image_source, Image.Image):
-            return image_source.convert("RGB")
-
-        elif isinstance(image_source, str):
-            return Image.open(image_source).convert("RGB")
-
-        elif hasattr(image_source, "file"):
-            return Image.open(
-                BytesIO(image_source.file.read())
-            ).convert("RGB")
-
-        elif isinstance(image_source, BytesIO):
-            return Image.open(image_source).convert("RGB")
-
-        else:
-            raise ValueError(f"Unsupported input type: {type(image_source)}")
-
-    def predict(self, image_source) -> str:
-
-        image = self._load_image(image_source)
-
-        inputs = self.processor(
-            images=image,
-            return_tensors="pt"
-        ).to(device)
-
-        with torch.no_grad():
-            logits = self.model(**inputs).logits
-            pred_id = logits.argmax(-1).item()
-
-        return self.id2label[pred_id]
+from inference.food_recognition import FoodClassifier
 
 
 class FoodEvaluator:
@@ -115,7 +17,10 @@ class FoodEvaluator:
 
     # ------------------ Strict evaluation ------------------
 
-    def evaluate_strict(self, test_dir: str, limit: int = None):
+    def evaluate(self, test_dir: str, limit: int = None):
+        from datasets import load_dataset
+        from sklearn.metrics import accuracy_score, f1_score
+        from tqdm import tqdm
 
         print("Loading dataset...")
         ds = load_dataset(
@@ -159,6 +64,9 @@ class FoodEvaluator:
     # ------------------ Semantic evaluation ------------------
 
     def evaluate_semantic(self, test_dir: str, limit: int = None):
+        from datasets import load_dataset
+        from sklearn.metrics import accuracy_score, f1_score
+        from tqdm import tqdm
 
         print("Loading dataset...")
         ds = load_dataset(
@@ -204,14 +112,14 @@ class FoodEvaluator:
         f1_strict = f1_score(y_true, y_pred, average="macro")
 
         print("\n Semantic Results:")
-        print(f"Strict Accuracy   : {acc_strict:.4f}")
+        print(f"Accuracy   : {acc_strict:.4f}")
         print(f"Semantic Accuracy : {semantic_acc:.4f}")
-        print(f"Strict F1-macro   : {f1_strict:.4f}")
+        print(f"F1-macro   : {f1_strict:.4f}")
 
         return {
-            "accuracy_strict": round(acc_strict, 4),
+            "accuracy": round(acc_strict, 4),
             "accuracy_semantic": round(semantic_acc, 4),
-            "f1_macro_strict": round(f1_strict, 4)
+            "f1_macro": round(f1_strict, 4)
         }
 
 
@@ -219,8 +127,8 @@ class FoodEvaluator:
 
 if __name__ == "__main__":
 
-    model_dir = "nateraw/food"
-    test_dir = "dataset/image/merged/test"
+    model_dir = os.getenv("MODEL_DIR", "yvelos/dinov3-food-389-v1")
+    test_dir = os.getenv("TEST_DIR", "dataset/image/not_merged/AFD/test")
 
     # Init classifier
     classifier = FoodClassifier(model_dir)

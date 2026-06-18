@@ -1,31 +1,58 @@
-import json
-import csv
-import re
 import ast
-
-from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-from rouge_score import rouge_scorer
+import csv
+import json
+import re
 
 
 class Evaluator:
+    MASS_UNITS_TO_G = {
+        "g": 1.0,
+        "gram": 1.0,
+        "grams": 1.0,
+        "mg": 0.001,
+        "milligram": 0.001,
+        "milligrams": 0.001,
+        "ug": 0.000001,
+        "mcg": 0.000001,
+        "microgram": 0.000001,
+        "micrograms": 0.000001,
+        "kg": 1000.0,
+        "kilogram": 1000.0,
+        "kilograms": 1000.0,
+    }
+
+    ENERGY_UNITS_TO_KCAL = {
+        "kcal": 1.0,
+        "calorie": 1.0,
+        "calories": 1.0,
+        "kj": 0.239005736,
+        "kilojoule": 0.239005736,
+        "kilojoules": 0.239005736,
+    }
+
+    DIMENSIONLESS_UNITS = {"none", "(none)", "unit", "units"}
+
+    UNIT_ALIASES = {
+        "µg": "ug",
+        "μg": "ug",
+        "cal": "kcal",
+    }
 
     def __init__(self, epsilon=0.1, epsilon_abs=0.1):
         """
         Args:
-            epsilon (float): Relative tolerance (default 10%)
-            epsilon_abs (float): Absolute tolerance for zero values
+            epsilon (float): Relative tolerance (default 10%).
+            epsilon_abs (float): Absolute tolerance for zero values.
         """
         self.epsilon = epsilon
         self.epsilon_abs = epsilon_abs
-
 
     # ----------------------------------
     # Loaders
     # ----------------------------------
 
     def load_ground_truth(self, json_path):
-        """Load ground truth components"""
-
+        """Load ground truth components."""
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
@@ -33,46 +60,55 @@ class Evaluator:
 
         for item in data:
             components = item.get("components", [])
-            comp_norm = [c.strip().lower() for c in components]
+            comp_norm = [str(c).strip().lower() for c in components]
             norm_components.append(comp_norm)
 
         return norm_components
 
-
     def load_predictions(self, csv_path):
-        """Load predicted components from CSV"""
-
+        """Load predicted components from CSV."""
         preds = []
 
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
-            next(reader)  # Skip header
+            header = next(reader, None)
+            if header is None:
+                raise ValueError(f"Prediction CSV is empty: {csv_path}")
 
-            for row in reader:
+            try:
+                components_idx = header.index("components")
+            except ValueError as exc:
+                raise ValueError(
+                    f"Prediction CSV must contain a 'components' column: {csv_path}"
+                ) from exc
 
-                raw_components = row[2].strip()
+            for row_number, row in enumerate(reader, start=2):
+                if len(row) <= components_idx:
+                    raise ValueError(
+                        f"Row {row_number} has no components column in {csv_path}"
+                    )
 
-                # Case: abstention
+                raw_components = row[components_idx].strip()
+
                 if raw_components.lower() == "i don't know":
                     preds.append(["i don't know"])
                     continue
 
                 try:
                     components = ast.literal_eval(raw_components)
-
-                    if isinstance(components, list):
-                        preds.append([
-                            c.strip('"').strip().lower()
-                            for c in components
-                        ])
-                    else:
-                        preds.append([])
-
                 except (ValueError, SyntaxError):
+                    preds.append([])
+                    continue
+
+                if isinstance(components, list):
+                    preds.append([
+                        str(c).strip('"').strip().lower()
+                        for c in components
+                    ])
+                else:
                     preds.append([])
 
         return preds
-
 
     # ----------------------------------
     # Parsing
@@ -80,27 +116,73 @@ class Evaluator:
 
     def parse_component(self, component_str):
         """
-        Parse: 'protein: 10 g' -> ('protein', 10.0, 'g')
+        Parse: 'protein: 10 g' -> ('protein', 10.0, 'g').
         """
+        match = re.fullmatch(
+            r"\s*(.*?):\s*"
+            r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
+            r"\s*([^\d\s]+)\s*",
+            component_str,
+        )
 
-        match = re.match(r"(.*?):\s*([\d\.]+)\s*(\w+)", component_str)
+        if not match:
+            return None, None, None
 
-        if match:
-            name = match.group(1).strip().lower()
-            value = float(match.group(2))
-            unit = match.group(3).lower()
+        name = match.group(1).strip().lower()
+        value = float(match.group(2))
+        unit = self.normalize_unit(match.group(3))
 
-            return name, value, unit
+        return name, value, unit
 
-        return None, None, None
+    def normalize_unit(self, unit):
+        unit = unit.strip().lower()
+        return self.UNIT_ALIASES.get(unit, unit)
 
+    def normalize_value(self, value, unit):
+        unit = self.normalize_unit(unit)
+
+        if unit in self.MASS_UNITS_TO_G:
+            return value * self.MASS_UNITS_TO_G[unit], "mass:g"
+
+        if unit in self.ENERGY_UNITS_TO_KCAL:
+            return value * self.ENERGY_UNITS_TO_KCAL[unit], "energy:kcal"
+
+        if unit in self.DIMENSIONLESS_UNITS:
+            return value, "dimensionless"
+
+        return value, f"unit:{unit}"
+
+    def parse_components_by_name(self, components):
+        parsed = {}
+
+        for component in components:
+            name, value, unit = self.parse_component(component)
+
+            if name is None:
+                continue
+
+            norm_value, unit_family = self.normalize_value(value, unit)
+            parsed[name] = {
+                "value": norm_value,
+                "unit_family": unit_family,
+                "raw_value": value,
+                "raw_unit": unit,
+            }
+
+        return parsed
 
     # ----------------------------------
     # Metrics
     # ----------------------------------
 
-    def jaccard_similarity(self, list1, list2):
+    def validate_lengths(self, gt_all, pred_all):
+        if len(gt_all) != len(pred_all):
+            raise ValueError(
+                "Ground truth and prediction counts differ: "
+                f"{len(gt_all)} ground-truth samples vs {len(pred_all)} predictions"
+            )
 
+    def jaccard_similarity(self, list1, list2):
         s1 = {x.lower().strip() for x in list1}
         s2 = {x.lower().strip() for x in list2}
 
@@ -108,44 +190,14 @@ class Evaluator:
 
         return len(s1.intersection(s2)) / len(union) if union else 0.0
 
-
     def precision_recall_f1(self, gt_all, pred_all):
+        self.validate_lengths(gt_all, pred_all)
 
         tp = fp = fn = 0
 
         for gt, pred in zip(gt_all, pred_all):
-
-            gt_set = set(gt)
-            pred_set = set(pred)
-
-            tp += len(gt_set & pred_set)
-            fp += len(pred_set - gt_set)
-            fn += len(gt_set - pred_set)
-
-        precision = tp / (tp + fp) if tp + fp else 0
-        recall = tp / (tp + fn) if tp + fn else 0
-        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
-
-        return precision, recall, f1
-
-
-    def precision_recall_f1_names(self, gt_all, pred_all):
-
-        tp = fp = fn = 0
-
-        for gt, pred in zip(gt_all, pred_all):
-
-            gt_names = {
-                self.parse_component(c)[0]
-                for c in gt
-                if self.parse_component(c)[0] is not None
-            }
-
-            pred_names = {
-                self.parse_component(c)[0]
-                for c in pred
-                if self.parse_component(c)[0] is not None
-            }
+            gt_names = set(self.parse_components_by_name(gt))
+            pred_names = set(self.parse_components_by_name(pred))
 
             tp += len(gt_names & pred_names)
             fp += len(pred_names - gt_names)
@@ -157,53 +209,49 @@ class Evaluator:
 
         return precision, recall, f1
 
-
     def compute_mae_and_accuracy(self, gt_all, pred_all):
+        self.validate_lengths(gt_all, pred_all)
 
         errors = []
         correct = 0
         total = 0
+        unit_mismatches = 0
 
         for gt, pred in zip(gt_all, pred_all):
+            gt_parsed = self.parse_components_by_name(gt)
+            pred_parsed = self.parse_components_by_name(pred)
 
-            gt_parsed = {
-                name: val
-                for name, val, _ in
-                (self.parse_component(c) for c in gt)
-                if name is not None
-            }
+            for nutrient, gt_item in gt_parsed.items():
+                if nutrient not in pred_parsed:
+                    continue
 
-            pred_parsed = {
-                name: val
-                for name, val, _ in
-                (self.parse_component(c) for c in pred)
-                if name is not None
-            }
+                pred_item = pred_parsed[nutrient]
 
-            for nutrient in gt_parsed:
-
-                if nutrient in pred_parsed:
-
-                    gt_val = gt_parsed[nutrient]
-                    pred_val = pred_parsed[nutrient]
-
-                    errors.append(abs(gt_val - pred_val))
+                if gt_item["unit_family"] != pred_item["unit_family"]:
+                    unit_mismatches += 1
                     total += 1
+                    continue
 
-                    if gt_val == 0:
-                        if abs(pred_val) <= self.epsilon_abs:
-                            correct += 1
-                    else:
-                        if abs(pred_val - gt_val) / gt_val <= self.epsilon:
-                            correct += 1
+                gt_val = gt_item["value"]
+                pred_val = pred_item["value"]
+
+                errors.append(abs(gt_val - pred_val))
+                total += 1
+
+                if gt_val == 0:
+                    if abs(pred_val) <= self.epsilon_abs:
+                        correct += 1
+                elif abs(pred_val - gt_val) / abs(gt_val) <= self.epsilon:
+                    correct += 1
 
         mae = sum(errors) / len(errors) if errors else 0.0
         acc = correct / total if total else 0.0
 
-        return mae, acc
-
+        return mae, acc, unit_mismatches
 
     def compute_abstention_rate(self, preds):
+        if not preds:
+            return 0.0
 
         abstained = sum(
             1 for p in preds
@@ -212,48 +260,50 @@ class Evaluator:
 
         return abstained / len(preds)
 
-
     def compute_jaccard(self, gt_all, pred_all):
+        self.validate_lengths(gt_all, pred_all)
 
         scores = [
             self.jaccard_similarity(gt, pred)
             for gt, pred in zip(gt_all, pred_all)
         ]
 
-        return sum(scores) / len(scores)
-
+        return sum(scores) / len(scores) if scores else 0.0
 
     # ----------------------------------
     # Main Evaluation
     # ----------------------------------
 
     def evaluate(self, ground_json, prediction_csv):
-
         gt = self.load_ground_truth(ground_json)
         preds = self.load_predictions(prediction_csv)
 
-        n = min(len(gt), len(preds))
-
-        gt = gt[:n]
-        preds = preds[:n]
+        self.validate_lengths(gt, preds)
+        n = len(gt)
 
         precision, recall, f1 = self.precision_recall_f1(gt, preds)
-
-        mae, acc = self.compute_mae_and_accuracy(gt, preds)
-
+        mae, acc, unit_mismatches = self.compute_mae_and_accuracy(gt, preds)
         abstention = self.compute_abstention_rate(preds)
-
         jaccard = self.compute_jaccard(gt, preds)
 
-        results = {
+        return {
             "Samples Evaluated": n,
+            "Samples to be Evaluated": len(gt),
             "Precision": round(precision, 2),
             "Recall": round(recall, 2),
             "F1-score": round(f1, 2),
             "MAE": round(mae, 2),
             "Accuracy@10%": round(acc, 2),
+            "Unit mismatches": unit_mismatches,
             "Abstention rate": round(abstention, 2),
-            "Jaccard": round(jaccard, 2)
+            "Jaccard": round(jaccard, 2),
         }
 
-        return results
+
+if __name__ == "__main__":
+    evaluator = Evaluator()
+
+    print(evaluator.evaluate(
+        ground_json="dataset/multimodal/merged/merged_test.json",
+        prediction_csv="results/falcon/clip/rag/merged.csv"
+    ))

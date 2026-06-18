@@ -1,0 +1,2 @@
+[console_scripts]
+food-finetune = main:main

@@ -1,0 +1,4 @@
+[console_scripts]
+image-annotation = main:main
+image-annotation-apply-corrections = apply_corrections:main
+image-annotation-eval = evaluation:main
