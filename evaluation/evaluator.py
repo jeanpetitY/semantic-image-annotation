@@ -1,6 +1,8 @@
+import argparse
 import ast
 import csv
 import json
+import os
 import re
 
 
@@ -30,8 +32,6 @@ class Evaluator:
         "kilojoules": 0.239005736,
     }
 
-    DIMENSIONLESS_UNITS = {"none", "(none)", "unit", "units"}
-
     UNIT_ALIASES = {
         "µg": "ug",
         "μg": "ug",
@@ -39,99 +39,130 @@ class Evaluator:
     }
 
     def __init__(self, epsilon=0.1, epsilon_abs=0.1):
-        """
-        Args:
-            epsilon (float): Relative tolerance (default 10%).
-            epsilon_abs (float): Absolute tolerance for zero values.
-        """
         self.epsilon = epsilon
         self.epsilon_abs = epsilon_abs
 
-    # ----------------------------------
-    # Loaders
-    # ----------------------------------
+    # ------------------ Loaders ------------------
 
-    def load_ground_truth(self, json_path):
-        """Load ground truth components."""
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    def make_sample_id(self, item):
+        return f"{item.get('label', '')} - {item.get('image', '')}"
 
-        norm_components = []
+    def load_ground_truth_records(self, json_path):
+        with open(json_path, "r", encoding="utf-8") as file:
+            data = json.load(file)
 
+        records = []
         for item in data:
             components = item.get("components", [])
-            comp_norm = [str(c).strip().lower() for c in components]
-            norm_components.append(comp_norm)
+            records.append({
+                "id": self.make_sample_id(item),
+                "label": str(item.get("label", "")).strip(),
+                "components": self.normalize_component_list(components),
+            })
 
-        return norm_components
+        return records
 
-    def load_predictions(self, csv_path):
-        """Load predicted components from CSV."""
-        preds = []
-
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            if header is None:
+    def load_prediction_records(self, csv_path):
+        with open(csv_path, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            if reader.fieldnames is None:
                 raise ValueError(f"Prediction CSV is empty: {csv_path}")
 
-            try:
-                components_idx = header.index("components")
-            except ValueError as exc:
+            required = {"id", "predicted_name", "components"}
+            missing = required - set(reader.fieldnames)
+            if missing:
                 raise ValueError(
-                    f"Prediction CSV must contain a 'components' column: {csv_path}"
-                ) from exc
+                    f"Prediction CSV is missing columns {sorted(missing)}: {csv_path}"
+                )
 
+            records = []
             for row_number, row in enumerate(reader, start=2):
-                if len(row) <= components_idx:
-                    raise ValueError(
-                        f"Row {row_number} has no components column in {csv_path}"
-                    )
+                raw_components = row.get("components", "").strip()
+                records.append({
+                    "id": row.get("id", "").strip(),
+                    "predicted_name": row.get("predicted_name", "").strip(),
+                    "components": self.parse_prediction_components(
+                        raw_components,
+                        row_number,
+                    ),
+                })
 
-                raw_components = row[components_idx].strip()
+        return records
 
-                if raw_components.lower() == "i don't know":
-                    preds.append(["i don't know"])
-                    continue
+    def parse_prediction_components(self, raw_components, row_number):
+        """
+        Parse the components field from prediction CSVs.
+        Accepts multiple literal formats produced by different models:
+        - A list of strings like ["protein: 10 g", ...]
+        - A list of dicts like [{"protein": "10 g"}, ...]
+        - A list of 2-tuples/lists like [("protein", "10 g"), ...]
+        - The exact string "I don't know" (case-insensitive) which is treated as abstention.
+        """
+        if raw_components.lower() == "i don't know":
+            return ["i don't know"]
 
-                try:
-                    components = ast.literal_eval(raw_components)
-                except (ValueError, SyntaxError):
-                    preds.append([])
-                    continue
+        try:
+            components = ast.literal_eval(raw_components)
+        except (ValueError, SyntaxError):
+            return []
 
-                if isinstance(components, list):
-                    preds.append([
-                        str(c).strip('"').strip().lower()
-                        for c in components
-                    ])
-                else:
-                    preds.append([])
+        # Normalize single dict into a list
+        if isinstance(components, dict):
+            components = [components]
 
-        return preds
+        if not isinstance(components, list):
+            return []
 
-    # ----------------------------------
-    # Parsing
-    # ----------------------------------
+        normalized_items = []
+        for item in components:
+            # dicts -> key: value
+            if isinstance(item, dict):
+                for k, v in item.items():
+                    normalized_items.append(f"{k}: {v}")
+            # tuples/lists of length 2 -> name, value
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                normalized_items.append(f"{item[0]}: {item[1]}")
+            else:
+                normalized_items.append(str(item))
+
+        return self.normalize_component_list(normalized_items)
+
+    def normalize_component_list(self, components):
+        return [
+            str(component).strip().strip('"').strip("'").lower()
+            for component in components
+            if str(component).strip()
+        ]
+
+    def align_records(self, gt_records, pred_records):
+        gt_by_id = {record["id"]: record for record in gt_records}
+        aligned = []
+        unmatched_predictions = 0
+
+        for pred in pred_records:
+            gt = gt_by_id.get(pred["id"])
+            if gt is None:
+                unmatched_predictions += 1
+                continue
+            aligned.append((gt, pred))
+
+        return aligned, unmatched_predictions
+
+    # ------------------ Parsing ------------------
 
     def parse_component(self, component_str):
-        """
-        Parse: 'protein: 10 g' -> ('protein', 10.0, 'g').
-        """
         match = re.fullmatch(
             r"\s*(.*?):\s*"
             r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
             r"\s*([^\d\s]+)\s*",
             component_str,
         )
-
         if not match:
             return None, None, None
 
         name = match.group(1).strip().lower()
         value = float(match.group(2))
         unit = self.normalize_unit(match.group(3))
-
         return name, value, unit
 
     def normalize_unit(self, unit):
@@ -147,17 +178,15 @@ class Evaluator:
         if unit in self.ENERGY_UNITS_TO_KCAL:
             return value * self.ENERGY_UNITS_TO_KCAL[unit], "energy:kcal"
 
-        if unit in self.DIMENSIONLESS_UNITS:
-            return value, "dimensionless"
+        if unit in {"%", "percent", "percentage"}:
+            return value, "percent"
 
         return value, f"unit:{unit}"
 
     def parse_components_by_name(self, components):
         parsed = {}
-
         for component in components:
             name, value, unit = self.parse_component(component)
-
             if name is None:
                 continue
 
@@ -171,72 +200,59 @@ class Evaluator:
 
         return parsed
 
-    # ----------------------------------
-    # Metrics
-    # ----------------------------------
-
-    def validate_lengths(self, gt_all, pred_all):
-        if len(gt_all) != len(pred_all):
-            raise ValueError(
-                "Ground truth and prediction counts differ: "
-                f"{len(gt_all)} ground-truth samples vs {len(pred_all)} predictions"
-            )
-
-    def jaccard_similarity(self, list1, list2):
-        s1 = {x.lower().strip() for x in list1}
-        s2 = {x.lower().strip() for x in list2}
-
-        union = s1.union(s2)
-
-        return len(s1.intersection(s2)) / len(union) if union else 0.0
-
-    def precision_recall_f1(self, gt_all, pred_all):
-        self.validate_lengths(gt_all, pred_all)
-
+    # ------------------ Metrics ------------------
+    
+    def component_confusion(self, gt_sets, pred_sets):
         tp = fp = fn = 0
 
-        for gt, pred in zip(gt_all, pred_all):
-            gt_names = set(self.parse_components_by_name(gt))
-            pred_names = set(self.parse_components_by_name(pred))
+        for gt_set, pred_set in zip(gt_sets, pred_sets):
+            tp += len(gt_set & pred_set)
+            fp += len(pred_set - gt_set)
+            fn += len(gt_set - pred_set)
 
-            tp += len(gt_names & pred_names)
-            fp += len(pred_names - gt_names)
-            fn += len(gt_names - pred_names)
+        return tp, fp, fn
 
-        precision = tp / (tp + fp) if tp + fp else 0
-        recall = tp / (tp + fn) if tp + fn else 0
-        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0
+    def set_prf(self, gt_sets, pred_sets):
+        tp, fp, fn =  self.component_confusion(gt_sets, pred_sets)
+
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
 
         return precision, recall, f1
 
-    def compute_mae_and_accuracy(self, gt_all, pred_all):
-        self.validate_lengths(gt_all, pred_all)
+    def mean_jaccard(self, gt_sets, pred_sets):
+        scores = []
+        for gt_set, pred_set in zip(gt_sets, pred_sets):
+            union = gt_set | pred_set
+            scores.append(len(gt_set & pred_set) / len(union) if union else 0.0)
 
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def value_metrics(self, aligned):
         errors = []
         correct = 0
         total = 0
         unit_mismatches = 0
 
-        for gt, pred in zip(gt_all, pred_all):
-            gt_parsed = self.parse_components_by_name(gt)
-            pred_parsed = self.parse_components_by_name(pred)
+        for gt, pred in aligned:
+            gt_parsed = self.parse_components_by_name(gt["components"])
+            pred_parsed = self.parse_components_by_name(pred["components"])
 
             for nutrient, gt_item in gt_parsed.items():
-                if nutrient not in pred_parsed:
+                pred_item = pred_parsed.get(nutrient)
+                if pred_item is None:
                     continue
 
-                pred_item = pred_parsed[nutrient]
+                total += 1
 
                 if gt_item["unit_family"] != pred_item["unit_family"]:
                     unit_mismatches += 1
-                    total += 1
                     continue
 
                 gt_val = gt_item["value"]
                 pred_val = pred_item["value"]
-
                 errors.append(abs(gt_val - pred_val))
-                total += 1
 
                 if gt_val == 0:
                     if abs(pred_val) <= self.epsilon_abs:
@@ -245,65 +261,152 @@ class Evaluator:
                     correct += 1
 
         mae = sum(errors) / len(errors) if errors else 0.0
-        acc = correct / total if total else 0.0
+        accuracy = correct / total if total else 0.0
+        return mae, accuracy, unit_mismatches, total
 
-        return mae, acc, unit_mismatches
-
-    def compute_abstention_rate(self, preds):
-        if not preds:
+    def abstention_rate(self, aligned):
+        if not aligned:
             return 0.0
-
         abstained = sum(
-            1 for p in preds
-            if len(p) == 1 and p[0].lower() == "i don't know"
+            1 for _, pred in aligned
+            if pred["components"] == ["i don't know"]
+        )
+        return abstained / len(aligned)
+
+    def food_accuracy(self, aligned):
+        if not aligned:
+            return 0.0
+        correct = sum(
+            1 for gt, pred in aligned
+            if gt["label"].lower() == pred["predicted_name"].lower()
+        )
+        return correct / len(aligned)
+    
+    def build_component_sets(self, aligned, is_ablation=False):
+        """
+        Build component sets depending on evaluation mode.
+
+        Standard mode:
+            Compare only nutrient/component names.
+            Example: "protein: 10 g" -> "protein"
+
+        Ablation mode:
+            Compare full component strings.
+            Example: "protein: 10 g" stays "protein: 10 g"
+        """
+
+        if is_ablation:
+            gt_component_sets = [
+                set(gt["components"])
+                for gt, _ in aligned
+            ]
+
+            pred_component_sets = [
+                set(pred["components"])
+                for _, pred in aligned
+            ]
+
+        else:
+            gt_component_sets = [
+                set(self.parse_components_by_name(gt["components"]))
+                for gt, _ in aligned
+            ]
+
+            pred_component_sets = [
+                set(self.parse_components_by_name(pred["components"]))
+                for _, pred in aligned
+            ]
+
+        return gt_component_sets, pred_component_sets
+
+    # ------------------ Evaluation ------------------
+
+    def evaluate(self, ground_json, prediction_csv, output_file=None, is_ablation=False):
+        gt_records = self.load_ground_truth_records(ground_json)
+        pred_records = self.load_prediction_records(prediction_csv)
+        aligned, unmatched_predictions = self.align_records(gt_records, pred_records)
+
+        gt_component_sets, pred_component_sets = self.build_component_sets(
+            aligned,
+            is_ablation=is_ablation,
         )
 
-        return abstained / len(preds)
+        precision, recall, f1 = self.set_prf(
+            gt_component_sets,
+            pred_component_sets,
+        )
+        mae, value_acc, unit_mismatches, value_pairs = self.value_metrics(aligned)
 
-    def compute_jaccard(self, gt_all, pred_all):
-        self.validate_lengths(gt_all, pred_all)
-
-        scores = [
-            self.jaccard_similarity(gt, pred)
-            for gt, pred in zip(gt_all, pred_all)
-        ]
-
-        return sum(scores) / len(scores) if scores else 0.0
-
-    # ----------------------------------
-    # Main Evaluation
-    # ----------------------------------
-
-    def evaluate(self, ground_json, prediction_csv):
-        gt = self.load_ground_truth(ground_json)
-        preds = self.load_predictions(prediction_csv)
-
-        self.validate_lengths(gt, preds)
-        n = len(gt)
-
-        precision, recall, f1 = self.precision_recall_f1(gt, preds)
-        mae, acc, unit_mismatches = self.compute_mae_and_accuracy(gt, preds)
-        abstention = self.compute_abstention_rate(preds)
-        jaccard = self.compute_jaccard(gt, preds)
-
-        return {
-            "Samples Evaluated": n,
-            "Samples to be Evaluated": len(gt),
-            "Precision": round(precision, 2),
-            "Recall": round(recall, 2),
-            "F1-score": round(f1, 2),
-            "MAE": round(mae, 2),
-            "Accuracy@10%": round(acc, 2),
-            "Unit mismatches": unit_mismatches,
-            "Abstention rate": round(abstention, 2),
-            "Jaccard": round(jaccard, 2),
+        results = {
+            "Evaluation mode": "ablation" if is_ablation else "standard",
+            "Samples Evaluated": len(aligned),
+            "Unmatched Predictions": unmatched_predictions,
+            "Samples to be Evaluated": len(gt_records),
+            "Predictions available": len(pred_records),
+            "Prediction coverage": round(len(aligned) / len(gt_records), 4) if gt_records else 0.0,
+            "Food accuracy": round(self.food_accuracy(aligned), 4),
+            "Precision": round(precision, 4),
+            "Recall": round(recall, 4),
+            "F1-score": round(f1, 4),
+            "Jaccard": round(
+                self.mean_jaccard(gt_component_sets, pred_component_sets),
+                4,
+            ),
+            "MAE": round(mae, 4),
+            "Accuracy@10%": round(value_acc, 4),
+            "Abstention rate": round(self.abstention_rate(aligned), 4),
+            "Answer rate": round(1 - self.abstention_rate(aligned), 4),
         }
+
+        results["Output file"] = self.save_results(
+            results,
+            prediction_csv,
+            output_file,
+        )
+        self.save_results(results, prediction_csv, results["Output file"])
+
+        return results
+
+    def save_results(self, results, prediction_csv, output_file=None):
+        if output_file is None:
+            pred_dir = os.path.dirname(prediction_csv)
+            pred_name = os.path.splitext(os.path.basename(prediction_csv))[0]
+            output_file = os.path.join(
+                pred_dir,
+                f"{pred_name}_evaluation_metrics.json",
+            )
+
+        output_dir = os.path.dirname(output_file)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        with open(output_file, "w", encoding="utf-8") as file:
+            json.dump(results, file, indent=4)
+
+        return output_file
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate nutrient predictions.")
+    parser.add_argument(
+        "--ground-json",
+        default="dataset/multimodal/not_merged/test/AFD_test.json",
+    )
+    parser.add_argument(
+        "--prediction-csv",
+        default="results/falcon/dinov3/rag/afd.csv",
+    )
+    parser.add_argument("--output-file", default=None)
+    parser.add_argument("--is-ablation", action="store_true")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
+    args = parse_args()
     evaluator = Evaluator()
-
     print(evaluator.evaluate(
-        ground_json="dataset/multimodal/merged/merged_test.json",
-        prediction_csv="results/falcon/clip/rag/merged.csv"
+        ground_json=args.ground_json,
+        prediction_csv=args.prediction_csv,
+        output_file=args.output_file,
+        is_ablation=args.is_ablation,
     ))

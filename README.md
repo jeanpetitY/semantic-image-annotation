@@ -20,7 +20,7 @@ The pipeline supports:
 
 To reproduce the experiments, we recommend the following hardware:
 
-- **GPU**: NVIDIA RTX A3090 (24GB VRAM)
+- **GPU**: NVIDIA RTX-class GPU (24GB VRAM)
 - **RAM**: 48 GB
 - **CPU**: 12 cores
 
@@ -59,7 +59,7 @@ you can run the code by run this command in your terminal
 python finetuning/train_classifier.py \
   --model_name microsoft/beit-base-patch16-384 \
   --data_dir dataset/image/merged \
-  --output_dir ./model_saved/beit-food-389-v2 \
+  --output_dir ./model_saved/food-model \
   --epochs 8 \
   --batch_size 32 \
   --lr 5e-5 \
@@ -95,27 +95,27 @@ the mode argument can only take two values semantic(in case your dataset is UECF
   - Without Knowledge augmentation
       ```bash
       python inference/nutrient_generator.py \
-    --index-name icml-paper \
-    --input-file dataset/multimodal/not_merged/test/fruitveg81_test.json \
-    --output-file results/falcon/beit/not_rag/fruitveg81.csv \
+    --index-name example-index \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --output-file results/text-model/vision-model/no_rag/example.csv \
     --mode no_rag \
     --selective
     ```
   - With Knowledge Augmentation
     ```bash
     python inference/nutrient_generator.py \
-    --index-name icml-paper \
-    --input-file dataset/multimodal/not_merged/test/fruitveg81_test.json \
-    --output-file results/falcon/beit/rag/fruitveg81.csv \
+    --index-name example-index \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --output-file results/text-model/vision-model/rag/example.csv \
     --mode rag \
     --selective
     ```
   - Case: Ablation Study
     ```bash
     python inference/nutrient_generator.py \
-    --index-name icml-paper \
-    --input-file dataset/multimodal/not_merged/test/fruitveg81_test.json \
-    --output-file results/falcon/beit/40/fruitveg81.csv \
+    --index-name example-index \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --output-file results/text-model/vision-model/ablation/example.csv \
     --mode no_rag \
     --selective \
     --ablation \
@@ -125,9 +125,9 @@ the mode argument can only take two values semantic(in case your dataset is UECF
   - case: Baseline with clip-based approach(semantic searc)
     ```bash
     python inference/nutrient_generator.py \
-    --index-name icml-paper \
-    --input-file dataset/multimodal/not_merged/test/fruitveg81_test.json \
-    --output-file results/falcon/beit/semantic_search/fruitveg81.csv \
+    --index-name example-index \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --output-file results/text-model/vision-model/semantic_search/example.csv \
     --mode semantic_search
     ```
 

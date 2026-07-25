@@ -52,17 +52,13 @@ USDA_KEY=your_usda_api_key
 Optional:
 
 ```bash
-USDA_BASE_URL=https://api.nal.usda.gov/fdc/v1
+USDA_BASE_URL=https://example.org/usda-api
 BASE_IMAGE_URL=https://your-image-base-url
 OPENAI_API_KEY=your_openai_key
 ```
 
-`OPENAI_API_KEY` is only required if you use an OpenAI validator model such as
-`gpt-4o-mini`. The default validator remains:
-
-```text
-tiiuae/Falcon3-7B-Instruct
-```
+`OPENAI_API_KEY` is only required if you use an external validator model. The
+default validator remains configurable through `--model-name`.
 
 ## Setup With uv
 
@@ -94,32 +90,32 @@ uv run image-annotation \
   --output-file outputs/fruitveg81/fruitveg81_usda.json \
   --not-annotated-file outputs/fruitveg81/fruitveg81_not_annotated.json \
   --fruit-veg \
-  --image-base-url https://api.tsotsa.org/other_dataset/fruitveg81/
+  --image-base-url https://example.org/images/fruitveg81/
 ```
 
 `--fruit-veg` keeps the FruitVeg81 workflow simple: the script appends `raw`
 to the USDA query and keeps the first USDA result. It does not use the LLM and
 does not search by data type priority.
 
-General food mode with the default Falcon3 validator:
+General food mode with the default validator:
 
 ```bash
 uv run image-annotation \
   --food-labels ../dataset/image/not_merged/food101/test \
   --output-file outputs/food101/food101_usda_raw.json \
   --not-annotated-file outputs/food101/food101_not_annotated.json \
-  --image-base-url https://api.tsotsa.org/other_dataset/food101/
+  --image-base-url https://example.org/images/food101/
 ```
 
-Use an OpenAI validator instead:
+Use an alternative validator instead:
 
 ```bash
 uv run image-annotation \
   --food-labels ../dataset/image/not_merged/food101/test \
   --output-file outputs/food101/food101_usda_raw.json \
   --not-annotated-file outputs/food101/food101_not_annotated.json \
-  --image-base-url https://api.tsotsa.org/other_dataset/food101/ \
-  --model-name gpt-4o-mini
+  --image-base-url https://example.org/images/food101/ \
+  --model-name example-validator
 ```
 
 UECFood256 uses the same flow with its own output folder:
@@ -129,7 +125,7 @@ uv run image-annotation \
   --food-labels ../dataset/image/not_merged/uecfood256/test \
   --output-file outputs/uecfood256/uecfood256_usda_raw.json \
   --not-annotated-file outputs/uecfood256/uecfood256_not_annotated.json \
-  --image-base-url https://api.tsotsa.org/other_dataset/uecfood256/
+  --image-base-url https://example.org/images/uecfood256/
 ```
 
 If you prefer running from the repository root, use:

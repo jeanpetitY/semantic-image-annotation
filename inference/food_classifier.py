@@ -1,7 +1,9 @@
+import argparse
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -123,32 +125,74 @@ class FoodEvaluator:
         }
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Evaluate a fine-tuned food classification model."
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        default=os.getenv("MODEL_DIR", "yvelos/dinov3-food-389-v1"),
+        help="Local path or Hugging Face model identifier.",
+    )
+    parser.add_argument(
+        "--test-dir",
+        type=str,
+        default=os.getenv("TEST_DIR", "dataset/image/not_merged/AFD/test"),
+        help="Directory containing the test split in imagefolder format.",
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["strict", "semantic"],
+        default="semantic",
+        help="Evaluation mode.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional number of samples to evaluate.",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default=None,
+        help="Optional JSON path for metrics.",
+    )
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> dict:
+    args = build_parser().parse_args(argv)
+
+    classifier = FoodClassifier(args.model_dir)
+    evaluator = FoodEvaluator(classifier)
+
+    if args.mode == "strict":
+        results = evaluator.evaluate(args.test_dir, limit=args.limit)
+    else:
+        results = evaluator.evaluate_semantic(args.test_dir, limit=args.limit)
+
+    if args.output_file is None:
+        save_dir = f"results/{args.model_dir.split('/')[-1]}"
+        os.makedirs(save_dir, exist_ok=True)
+        output_file = os.path.join(
+            save_dir,
+            f"{Path(args.test_dir).parent.name}_metrics.json"
+        )
+    else:
+        output_file = args.output_file
+        output_dir = os.path.dirname(output_file)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+    with open(output_file, "w") as f:
+        json.dump(results, f, indent=4)
+
+    print(f"\nResults saved to {output_file}")
+    return results
 
 
 if __name__ == "__main__":
-
-    model_dir = os.getenv("MODEL_DIR", "yvelos/dinov3-food-389-v1")
-    test_dir = os.getenv("TEST_DIR", "dataset/image/not_merged/AFD/test")
-
-    # Init classifier
-    classifier = FoodClassifier(model_dir)
-
-    # Init evaluator
-    evaluator = FoodEvaluator(classifier)
-
-    # Evaluate
-    results = evaluator.evaluate_semantic(test_dir)
-
-    # Save results
-    save_dir = f"results/{model_dir.split('/')[-1]}"
-    os.makedirs(save_dir, exist_ok=True)
-
-    out_file = os.path.join(
-        save_dir,
-        f"{test_dir.split('/')[-2]}_metrics.json"
-    )
-
-    with open(out_file, "w") as f:
-        json.dump(results, f, indent=4)
-
-    print(f"\nResults saved to {out_file}")
+    main()

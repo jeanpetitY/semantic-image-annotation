@@ -18,6 +18,103 @@ The module supports two training modes:
 - `main.py`: only executable entry point for this module.
 - `run_finetuning_sbatch.sh`: SLURM script dedicated to fine-tuning jobs.
 
+## Prerequisites
+
+- **Python 3.12** — this module includes a `.python-version` file pinned to `3.12` for PyTorch compatibility
+- **[uv](https://docs.astral.sh/uv/)** — used as the package manager, environment manager, and script runner
+
+## Reproducibility At A Glance
+
+For the strongest reproduction path, use the commands and conventions below:
+
+1. Enter the module directory:
+
+```bash
+cd finetuning
+```
+
+2. Recreate the exact locked environment:
+
+```bash
+uv sync --frozen
+```
+
+3. Run the module with the locked environment:
+
+```bash
+uv run food-finetune --help
+```
+
+The authoritative environment specification for this module is:
+
+- `pyproject.toml`: human-readable dependency declaration
+- `uv.lock`: exact resolved dependency set used by `uv sync --frozen`
+
+The code also fixes the random seed to `42` for Python, NumPy, and PyTorch.
+However, exact bitwise reproducibility is not guaranteed across hardware,
+CUDA/cuDNN versions, or mixed-precision kernels.
+
+## Expected Hardware
+
+The reported experiments were designed for a single modern GPU. The SLURM
+launcher in this folder targets:
+
+- `gpu:example-gpu:1`
+- `p_48G`
+
+In practice, use at least:
+
+- one NVIDIA GPU in the 24 GB VRAM class for the documented DINOv3 runs
+- enough local storage for the Hugging Face model cache and dataset cache
+
+DINOv3 has a substantially larger compute and memory footprint than the BEiT
+and CLIP runs documented here. Reusing `batch_size=32` for DINOv3 was not the
+stable configuration retained in this module; the documented DINOv3 runs use a
+smaller batch size accordingly.
+
+## Input Dataset Contract
+
+This module expects an image classification dataset already prepared on disk in
+Hugging Face `imagefolder` layout.
+
+Supported layouts:
+
+```text
+<data_dir>/
+  train/
+    <class_a>/
+    <class_b>/
+    ...
+  val/
+    <class_a>/
+    <class_b>/
+    ...
+```
+
+or, if no validation folder is available:
+
+```text
+<data_dir>/
+  train/
+    <class_a>/
+    <class_b>/
+    ...
+```
+
+Behavior:
+
+- if `<data_dir>/val` exists, it is used as the validation split
+- otherwise, the module creates a validation split from `train/` using
+  `val_ratio=0.1` and `seed=42`
+- the cached dataset stores the raw split only; augmentations are applied
+  dynamically during training
+
+This fine-tuning module does not rebuild the merged dataset from the upstream
+Food101, FruitVeg81, AFD, and UECFOOD256 sources. Reproducing the exact
+training corpus therefore also requires reproducing the upstream dataset
+construction pipeline outside this folder. In this repository, the fine-tuning
+commands assume `dataset/image/merged` as the prepared input root.
+
 ## Output Organization
 
 When `--output_dir` is not explicitly provided, outputs are organized by model
@@ -92,6 +189,12 @@ Install/synchronize the module environment:
 
 ```bash
 uv sync
+```
+
+For exact dependency reproduction, prefer:
+
+```bash
+uv sync --frozen
 ```
 
 The module also contains `.python-version` set to `3.12`, so `uv` should select
@@ -208,6 +311,47 @@ If you prefer running from the repository root, use:
 uv --project finetuning run food-finetune --help
 ```
 
+## Experiment Matrix
+
+The runs documented in this folder are summarized below.
+
+| Model | Epochs | Batch size | Learning rate | Weight decay | Warmup ratio | FP16 | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| BEiT | 8 | 32 | `5e-5` | `0.01` | `0.05` | yes | same settings as CLIP baseline |
+| BEiT | 12 | 32 | `5e-5` | `0.01` | `0.05` | yes | same settings as CLIP baseline |
+| BEiT | 16 | 32 | `5e-5` | `0.01` | `0.05` | yes | same settings as CLIP baseline |
+| CLIP | 8 | 32 | `5e-5` | `0.01` | `0.05` | yes | supervised fine-tuning of the visual backbone |
+| CLIP | 12 | 32 | `5e-5` | `0.01` | `0.05` | yes | supervised fine-tuning of the visual backbone |
+| CLIP | 16 | 32 | `5e-5` | `0.01` | `0.05` | yes | supervised fine-tuning of the visual backbone |
+| ViT | 8 | 32 | `5e-5` | `0.01` | `0.05` | yes | optional reference run |
+| ViT | 12 | 32 | `5e-5` | `0.01` | `0.05` | yes | optional reference run |
+| ViT | 16 | 32 | `5e-5` | `0.01` | `0.05` | yes | optional reference run |
+| DINOv3 | 8 | 8 | `1e-5` | `0.01` | `0.05` | yes | backbone + linear classifier |
+| DINOv3 | 16 | 8 | `1e-5` | `0.01` | `0.05` | yes | backbone + linear classifier |
+| DINOv3 | 8 | 16 | `2e-5` | `0.01` | `0.05` | yes | backbone + linear classifier |
+
+Additional trainer settings shared by the documented runs:
+
+- `save_strategy=epoch`
+- `evaluation_strategy=epoch` (or `eval_strategy=epoch`, depending on the installed `transformers` signature)
+- `logging_steps=50`
+- `remove_unused_columns=False`
+- `load_best_model_at_end=True`
+- `metric_for_best_model=accuracy`
+- `greater_is_better=True`
+- `report_to=none`
+- `seed=42`
+
+Data preprocessing shared by the documented runs:
+
+- training transforms: `RandomResizedCrop`, `RandomHorizontalFlip`, `ToTensor`, normalization from the model processor
+- validation transforms: `Resize`, `CenterCrop`, `ToTensor`, normalization from the model processor
+
+Model loading behavior:
+
+- BEiT / CLIP / ViT classification checkpoints are loaded through `AutoModelForImageClassification`
+- DINOv3 is loaded through `AutoModel` and fine-tuned with a custom linear classification head
+
 ## SLURM Usage
 
 Run SLURM commands from the repository root:
@@ -286,3 +430,6 @@ sbatch --export=ALL,MODEL_KEY=dinov3,MODEL_NAME=facebook/dinov3-vitl16-pretrain-
 - Use `--overwrite_cache` or `OVERWRITE_CACHE=1` only when you want to rebuild the cached dataset split.
 - If you pass `--output_dir` manually, automatic `model/epochs` output nesting is disabled.
 - For papers/reports, describe CLIP here as supervised fine-tuning of the CLIP visual backbone, not full multimodal CLIP fine-tuning.
+- If strict external reproducibility is required, archive the exact prepared
+  dataset tree used under `dataset/image/merged` together with this module,
+  because the fine-tuning code assumes that tree already exists.

@@ -1,33 +1,26 @@
-from __future__ import annotations
+from io import BytesIO
+from pathlib import Path
+from typing import Union
 
 import argparse
 import ast
 import csv
-import gc
 import os
 import random
 import sys
-from dataclasses import dataclass
-from io import BytesIO
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
 import requests
 import torch
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # type: ignore
+from fastapi import UploadFile
 from huggingface_hub import login
 from PIL import Image
 from pinecone import Pinecone, ServerlessSpec
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
-from transformers import (
-    AutoTokenizer,
-    CLIPModel,
-    CLIPProcessor,
-    pipeline,
-)
+from transformers import AutoTokenizer, CLIPModel, CLIPProcessor, pipeline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -36,319 +29,586 @@ if str(PROJECT_ROOT) not in sys.path:
 from inference.food_recognition import FoodClassifier
 
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-TEXT_MODEL_NAME = "tiiuae/Falcon3-7B-Instruct"
-CLASSIFIER_MODEL_NAME = "yvelos/dinov3-food-389-v1"
-TEXT_EMBED_MODEL_NAME = "intfloat/multilingual-e5-large"
-CLIP_MODEL_NAME = "openai/clip-vit-base-patch32"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def set_seed(seed: int = 42) -> None:
-    """Set random seeds for reproducibility."""
+def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+    # for a deterministic behavior (may impact performance):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
-def ensure_parent_dir(file_path: str) -> None:
-    """Create the parent directory of a file path if it does not exist."""
-    parent = Path(file_path).parent
-    if str(parent) not in ("", "."):
-        parent.mkdir(parents=True, exist_ok=True)
+load_dotenv()
+
+login(token=os.getenv("HUB_TOKEN"))
 
 
-def safe_literal_eval_list(value: str) -> List[Any]:
-    """Safely parse a Python-list-like string; return [] on parse failure."""
-    try:
-        parsed = ast.literal_eval(value)
-        if isinstance(parsed, list):
-            return parsed
-    except (ValueError, SyntaxError):
-        pass
-    return []
+model_name = "tiiuae/Falcon3-7B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+classifier_model_name = "yvelos/dinov3-food-389-v1"
 
 
-@dataclass
-class GenerationConfig:
-    """Text generation configuration for the LLM pipeline."""
+model_img_emb = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+processor_img_emb = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-    max_new_tokens: int = 512
-    temperature: float = 0.7
-    top_p: float = 0.95
-    top_k: int = 50
-    do_sample: bool = True
+pipe = pipeline(
+    "text-generation",
+    model=model_name,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    max_new_tokens=512,
+    temperature=0.7,
+    top_p=0.95,
+    top_k=50,
+    # repetition_penalty=1.2,
+    # num_return_sequences=1,
+    do_sample=True,
+    pad_token_id=tokenizer.eos_token_id,
+    eos_token_id=tokenizer.eos_token_id,
+    bos_token_id=tokenizer.bos_token_id,
+    use_cache=True,
+)
+
+HAS_IMAGE_KEY = "http://example.org/food#hasImage"
+RDFS_LABEL_KEY = "http://www.w3.org/2000/01/rdf-schema#label"
+
+
+def _extract_first_value(value):
+    if isinstance(value, list) and value:
+        first_item = value[0]
+        if isinstance(first_item, dict):
+            return first_item.get("@value")
+        return first_item
+    return value
+
+
+def _extract_label_from_jsonld_identifier(record: dict) -> str:
+    identifier = str(record.get("@id", ""))
+    type_values = record.get("@type", [])
+
+    candidates = []
+    if "#" in identifier:
+        candidates.append(identifier.split("#", 1)[1])
+    if isinstance(type_values, list) and type_values:
+        first_type = str(type_values[0])
+        if "#" in first_type:
+            candidates.append(first_type.split("#", 1)[1])
+        else:
+            candidates.append(first_type)
+
+    for candidate in candidates:
+        if "_Img_" in candidate:
+            prefix = candidate.split("_Img_", 1)[0]
+        elif candidate.endswith("_Images"):
+            prefix = candidate[: -len("_Images")]
+        else:
+            continue
+
+        if "_" in prefix:
+            return prefix.rsplit("_", 1)[0]
+        return prefix
+
+    label_value = _extract_first_value(record.get(RDFS_LABEL_KEY))
+    if label_value is not None:
+        return str(label_value)
+
+    return identifier
+
+
+def _normalize_input_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if {"label", "image"}.issubset(df.columns):
+        return df.copy()
+
+    if "@id" in df.columns and HAS_IMAGE_KEY in df.columns:
+        normalized_rows = []
+        for record in df.to_dict(orient="records"):
+            image_path = _extract_first_value(record.get(HAS_IMAGE_KEY))
+            if not image_path:
+                continue
+
+            normalized_rows.append(
+                {
+                    "label": _extract_label_from_jsonld_identifier(record),
+                    "image": str(image_path),
+                }
+            )
+
+        return pd.DataFrame(normalized_rows)
+
+    raise ValueError(
+        "Unsupported input format. Expected columns {'label', 'image'} "
+        "or JSON-LD records with '@id' and image metadata."
+    )
+
+
+def load_input_dataframe(input_file: str) -> pd.DataFrame:
+    input_path = Path(input_file)
+
+    if input_path.suffix.lower() == ".csv":
+        df = pd.read_csv(input_file)
+    elif input_path.suffix.lower() == ".jsonl":
+        df = pd.read_json(input_file, lines=True)
+    else:
+        df = pd.read_json(input_file)
+
+    return _normalize_input_dataframe(df)
 
 
 class RAGRecipe:
-    """RAG helper for image/text embedding and Pinecone retrieval."""
-
     def __init__(
         self,
-        index_name: str,
-        cloud: str = "aws",
-        region: str = "us-east-1",
-        metric: str = "cosine",
-    ) -> None:
+        index_name,
+        cloud="aws",
+        region="us-east-1",
+        metric="cosine",
+    ):
         self.index_name = index_name
         self.cloud = cloud
         self.region = region
         self.metric = metric
+        self.text_model = None
+        self.model_emb = None
+        self.processor = None
+        self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
 
-        pinecone_key = os.getenv("PINECONE_API_KEY")
-        if not pinecone_key:
-            raise EnvironmentError("PINECONE_API_KEY is missing in environment variables.")
+    # ------------------ Pinecone setup ------------------
 
-        self.pc = Pinecone(api_key=pinecone_key)
-        self.text_model: Optional[SentenceTransformer] = None
-        self.clip_model: Optional[CLIPModel] = None
-        self.clip_processor: Optional[CLIPProcessor] = None
-
-    # ------------------ Setup ------------------
-
-    def set_text_model(self, model_name: str = TEXT_EMBED_MODEL_NAME) -> None:
-        self.text_model = SentenceTransformer(model_name)
-
-    def load_clip(self, model_name: str = CLIP_MODEL_NAME) -> None:
-        if self.clip_model is None or self.clip_processor is None:
-            self.clip_model = CLIPModel.from_pretrained(model_name)
-            self.clip_processor = CLIPProcessor.from_pretrained(model_name)
-
-    def _ensure_index(self, dimension: int = 512):
-        existing_indexes = set(self.pc.list_indexes().names())
-        if self.index_name not in existing_indexes:
-            self.pc.create_index(
-                name=self.index_name,
-                dimension=dimension,
-                metric=self.metric,
-                spec=ServerlessSpec(cloud=self.cloud, region=self.region),
-            )
+    def create_index(self, dimension=512):
+        self.pc.create_index(
+            name=self.index_name,
+            dimension=dimension,
+            metric=self.metric,
+            spec=ServerlessSpec(cloud=self.cloud, region=self.region),
+        )
         return self.pc.Index(self.index_name)
 
-    def use_index(self, name: Optional[str] = None):
-        return self.pc.Index(name or self.index_name)
+    def use_index(self, name):
+        self.index_name = name
+        return self.pc.Index(self.index_name)
 
-    # ------------------ Embeddings ------------------
+    def set_text_model(self):  # e.g. SentenceTransformer(...)
+        self.text_model = SentenceTransformer("intfloat/multilingual-e5-large")
 
-    def embed_text(self, text: str) -> np.ndarray:
-        if self.text_model is None:
-            raise RuntimeError("Text model is not initialized. Call set_text_model() first.")
-        return self.text_model.encode(text, convert_to_numpy=True)
+    def load_clip(self):
+        if self.model_emb is None:
+            self.model_emb = model_img_emb
+            self.processor = processor_img_emb
 
-    def embed_image(self, image_source: Union[str, BytesIO]) -> np.ndarray:
-        if self.clip_model is None or self.clip_processor is None:
-            raise RuntimeError("CLIP model is not initialized. Call load_clip() first.")
-
-        if isinstance(image_source, str) and image_source.startswith(("http://", "https://")):
-            response = requests.get(image_source, timeout=30)
-            response.raise_for_status()
+    # ------------------ Image embedding ------------------
+    def embed_image(self, image_source: Union[str, UploadFile, BytesIO]):
+        # Case 1 : Image URL (str)
+        if isinstance(image_source, str) and (
+            image_source.startswith("http://")
+            or image_source.startswith("https://")
+        ):
+            response = requests.get(image_source)
             image = Image.open(BytesIO(response.content)).convert("RGB")
+        # Case 2 : Local path (str)
         elif isinstance(image_source, str):
             image = Image.open(image_source).convert("RGB")
+
+        # Cas3 3 : Uploaded File (UploadFile ou BytesIO)
+        elif isinstance(image_source, UploadFile):
+            image_bytes = image_source.file.read()
+            image = Image.open(BytesIO(image_bytes)).convert("RGB")
         elif isinstance(image_source, BytesIO):
             image = Image.open(image_source).convert("RGB")
         else:
-            raise ValueError(f"Unsupported image source type: {type(image_source)}")
+            raise ValueError("Unsupported image source type.")
 
-        inputs = self.clip_processor(images=image, return_tensors="pt")
+        inputs = self.processor(images=image, return_tensors="pt")
         with torch.no_grad():
-            features = self.clip_model.get_image_features(**inputs)
+            features = self.model_emb.get_image_features(**inputs)
         return features[0].cpu().numpy()
 
-    # ------------------ Search ------------------
+    # ------------------ Text embedding ------------------
+    def embed_text(self, text: str):
+        return self.text_model.encode(text, convert_to_numpy=True)
 
-    def _search(self, embedding: np.ndarray, top_k: int, namespace: str) -> List[Dict[str, Any]]:
-        index = self.use_index()
+    # ------------------ Store embeddings ------------------
+    def store_embedding(
+        self,
+        is_new_index: bool,
+        id: str,
+        embedding,
+        metadata: dict,
+        namespace="ns1",
+    ):
+        if namespace == "text":
+            index = self.use_index(name="tsotsatext")
+        else:
+            index = self.create_index() if is_new_index else self.use_index()
+
+        index.upsert(
+            [{"id": id, "values": embedding, "metadata": metadata}],
+            namespace=namespace,
+            batch_size=12,
+        )
+
+    def store_text_embedding(
+        self,
+        id: str,
+        text: str,
+        metadata: dict,
+        namespace="text",
+    ):
+        emb = self.embed_text(text)
+        self.store_embedding(id, emb, metadata, namespace)
+
+    def store_image_embedding(
+        self,
+        id: str,
+        image_path: any,
+        metadata: dict,
+        namespace="image",
+    ):
+        emb = self.embed_image(image_path)
+        self.store_embedding(id, emb, metadata, namespace)
+
+    # ------------------ Semantic search ------------------
+
+    def search_by_text(self, query: str, top_k=5, namespace="text"):
+        emb = self.embed_text(query)
+        return self._search(emb, top_k, namespace)
+
+    def search_by_image(
+        self,
+        image_path: Union[str, UploadFile, BytesIO],
+        top_k=5,
+        namespace="image",
+    ):
+        emb = self.embed_image(image_path)
+        return self._search(emb, top_k, namespace)
+
+    def search_first_by_image(
+        self,
+        image_path: Union[str, UploadFile, BytesIO],
+        namespace="image",
+    ):
+        results = self.search_by_image(image_path, top_k=1, namespace=namespace)
+        return results[0] if results else None
+
+    def _search(self, embedding, top_k, namespace):
+        # if namespace == "text":
+        #     index = self.use_index("tsotsatext")
+        # else:
+        index = self.use_index(self.index_name)
         results = index.query(
             vector=embedding.tolist(),
             top_k=top_k,
             namespace=namespace,
             include_metadata=True,
         )
-        return [match.get("metadata", {}) for match in results.get("matches", [])]
+        # print(results)
+        return [match["metadata"] for match in results["matches"]]
 
-    def search_by_text(self, query: str, top_k: int = 5, namespace: str = "text") -> List[Dict[str, Any]]:
-        emb = self.embed_text(query)
-        return self._search(emb, top_k, namespace)
+    # ------------------ Unified query ------------------
 
-    def search_by_image(
-        self,
-        image_source: Union[str, BytesIO],
-        top_k: int = 5,
-        namespace: str = "image",
-    ) -> List[Dict[str, Any]]:
-        emb = self.embed_image(image_source)
-        return self._search(emb, top_k, namespace)
-
-    def search_topk_by_image(
-        self,
-        image_source: Union[str, BytesIO],
-        top_k: int = 1,
-        namespace: str = "image",
-    ) -> Optional[Dict[str, Any]]:
-        results = self.search_by_image(image_source, top_k=top_k, namespace=namespace)
-        if top_k == 1:
-            return results[0] if results else None
-        elif top_k == 2:
-            return results[1] if results else None
-        elif top_k == 3:
-            return results[2] if results else None
-        
-        elif top_k == 4:
-            return results[3] if results else None
-        
-        elif top_k >= 5:
-            return results[4] if results else None 
-        return results[0] if results else None
+    def smart_search(self, input_data, top_k=5):
+        """
+        input_data: str (text) or str (image_path ending with .jpg/.png/.jpeg)
+        """
+        if isinstance(input_data, str) and (
+            ".jpg" or ".png" or ".jpeg" in input_data.lower()
+        ):
+            return self.search_by_image(input_data, top_k=top_k, namespace="image")
+        else:
+            return self.search_by_text(input_data, top_k=top_k, namespace="text")
 
 
 class FoodAssistant:
-    """Food prediction + nutrient generation pipeline."""
-
-    def __init__(
-        self,
-        rag: RAGRecipe,
-        text_model_name: str = TEXT_MODEL_NAME,
-        classifier_model_name: str = CLASSIFIER_MODEL_NAME,
-    ) -> None:
+    def __init__(self, rag: RAGRecipe):
         self.rag = rag
-        self.text_model_name = text_model_name
-
         self.food_classifier = FoodClassifier(classifier_model_name)
 
-        self._tokenizer = AutoTokenizer.from_pretrained(self.text_model_name)
-        self._text_pipe = None
-        self._generation_config = GenerationConfig()
-
-    def _get_text_pipe(self):
-        if self._text_pipe is None:
-            self._text_pipe = pipeline(
-                "text-generation",
-                model=self.text_model_name,
-                torch_dtype=torch.float16,
-                device_map="auto",
-                max_new_tokens=self._generation_config.max_new_tokens,
-                temperature=self._generation_config.temperature,
-                top_p=self._generation_config.top_p,
-                top_k=self._generation_config.top_k,
-                do_sample=self._generation_config.do_sample,
-                pad_token_id=self._tokenizer.eos_token_id,
-                eos_token_id=self._tokenizer.eos_token_id,
-                bos_token_id=self._tokenizer.bos_token_id,
-                use_cache=True,
-            )
-        return self._text_pipe
-
-    # ------------------ Prompting ------------------
-
-    @staticmethod
-    def _format_rag_context(docs: Sequence[Dict[str, Any]], query: str) -> str:
+    def _format_context(self, docs, query, fallback="Information not found."):
         if not docs:
-            context = "- Information not found."
-        else:
-            context = "\n".join(f"- {doc}" for doc in docs)
+            docs = [fallback]
+        context = "\n".join([f"- {doc}" for doc in docs])
         return (
-            f"Here is information found on ORKG about {query}:\n"
-            f"{context}\n\n"
-            f"Please provide all nutritional components for {query}."
+            "Here is the information found on ORKG(Open Research Knowledge "
+            f"Graph) about {query} food: {context}\n\nPlease provide all the "
+            f"food components of: {query} food?"
         )
 
-    @staticmethod
-    def _messages_no_rag(prompt: str, selective: bool) -> List[Dict[str, str]]:
-        if not selective:
-            system = (
-                "You are a specialized assistant in food information engineering.\n\n\
-                Your task is to provide the nutritional components of a food item.\n\n\
-                STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
-                1. you should use your own knowledge.\n\
-                2. The output must be a python list of strings, and only that.\n\
-                3. Each element must follow this exact format:\n\
-                \"nutrient: value unit\"\n\
-                4. Example of a valid output:\n\
-                ['iron: 1.42 mg', 'zinc: 1.11 mg']\n\
-                5. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
-                6. Do not include nutrient names without values or units.\n\
-                7. Return only the final python list - nothing else."
-            )
+    def choose_message(
+        self,
+        prompt: Union[dict, str],
+        is_rag: bool = False,
+        is_selective: bool = False,
+    ):
+        """
+        Chooses a message based on the value of `is_rag`.
+        """
+    
+        if not is_rag:
+            if not is_selective:
+                # Message for without knowledge graph
+                # This message is used when the model does not need to access a knowledge graph.
+                return [
+                    {
+                        "role": "system",
+                        "content": "You are a specialized assistant in food information engineering.\n\n\
+                        Your task is to provide the nutritional components of a food item.\n\n\
+                        STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
+                        1. you should use your own knowledge.\n\
+                        2. The output must be a python list of strings, and only that.\n\
+                        3. Each element must follow this exact format:\n\
+                        \"nutrient: value unit\"\n\
+                        4. Example of a valid output:\n\
+                        ['iron: 1.42 mg', 'zinc: 1.11 mg']\n\
+                        5. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
+                        6. Do not include nutrient names without values or units.\n\
+                        7. Return only the final python list - nothing else.",
+                    },
+                    {"role": "user", "content": f"{prompt}"},
+                ]
+            else:
+                # Message for without knowledge graph but selective
+                return [
+                    {
+                        "role": "system",
+                        "content": "You are a specialized assistant in food information engineering.\n\n\
+                        Your task is to provide the nutritional components of a food item.\n\n\
+                        STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
+                        1. you should use your own knowledge and do not invent nutritional component if you don't know.\n\
+                        2. The output must be a python list of strings, and only that.\n\
+                        3. Each element must follow this exact format:\n\
+                        \"nutrient: value unit\"\n\
+                        4. Example of a valid output:\n\
+                        ['iron: 1.42 mg', 'zinc: 1.11 mg',.... 'compN: valueN unitN']\n\
+                        5. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
+                        6. Do not include nutrient names without values or units.\n\
+                        7. Return only the final python list OR \"I don't know\" - nothing else.",
+                    },
+                    {"role": "user", "content": f"{prompt}"},
+                ]
         else:
-            system = (
-                "You are a specialized assistant in food information engineering.\n\n\
-                Your task is to provide the nutritional components of a food item.\n\n\
-                STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
-                1. you should use your own knowledge and do not invent nutritional component if you don't know.\n\
-                2. The output must be a python list of strings, and only that.\n\
-                3. Each element must follow this exact format:\n\
-                \"nutrient: value unit\"\n\
-                4. Example of a valid output:\n\
-                ['iron: 1.42 mg', 'zinc: 1.11 mg',.... 'compN: valueN unitN']\n\
-                5. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
-                6. Do not include nutrient names without values or units.\n\
-                7. Return only the final python list OR \"I don't know\" - nothing else."
-            )
-        return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+            if not is_selective:
+                # Message for with knowledge graph
+                return [
+                    {
+                        "role": "system",
+                        "content": "You are a specialized assistant in food information engineering.\n\n\
+                        Your task is to extract and return the nutritional components of a food item.\n\n\
+                        STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
+                        1. Use only the information explicitly present in the user-provided context.\n\
+                        2. Do NOT invent, infer, estimate, or guess any nutrient, value, or unit.\n\
+                        4. The output must be a python list of strings, and only that.\n\
+                        5. Each element must follow this exact format:\n\
+                        \"nutrient: value unit\"\n\
+                        6. Example of a valid output:\n\
+                        ['iron: 1.42 mg', 'zinc: 1.11 mg']\n\
+                        7. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
+                        8. Do not include nutrient names without values or units.\n\
+                        9. Do not reference ingredients, sources, or descriptions.\n\
+                        10. Return only the final python list - nothing else.",
+                    },
+                    {"role": "user", "content": f"{prompt}"},
+                ]
+            else:
+                # Message for with knowledge graph but selective
+                return [
+                    {
+                        "role": "system",
+                        "content": "You are a specialized assistant in food information engineering.\n\n\
+                        Your task is to extract and return the nutritional components of a food item.\n\n\
+                        STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
+                        1. Use only the information explicitly present in the user-provided context.\n\
+                        2. Do NOT invent, infer, estimate, or guess any nutrient, value, or unit.\n\
+                        3. If the requested food does NOT exist in the context, reply EXACTLY:\n\
+                        \"I don't know\"\n\
+                        4. You must extract EVERY nutritional component corresponding to the user query from the context.\n\
+                        Keep in mind that that some components can have 0 as their value, but they must still be included.\n\
+                        The components should be extracted in the order they appear in the context.\n\
+                        5. Do NOT skip, summarize, merge, filter, rank, or select only the most important components.\n\
+                        6. If a component in the context has a nutrient name, value, and unit, it MUST appear in the output.\n\
+                        7. The output must be a python list of strings, and only that.\n\
+                        8. Each element must follow this exact format:\n\
+                        nutrient: value unit\n\
+                        9. Example of a VALID output:\n\
+                        ['iron: 1.42 mg', 'zinc: 1.11 mg',.... 'compN: valueN unitN']\n\
+                        10. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
+                        11. Do not include nutrient names without values or units.\n\
+                        12. Do not reference ingredients, sources, or descriptions.\n\
+                        13. Return only the final python list OR \"I don't know\" - nothing else.",
+                    },
+                    {"role": "user", "content": f"{prompt}"},
+                ]
 
-    @staticmethod
-    def _messages_rag(prompt: str, selective: bool) -> List[Dict[str, str]]:
-        if selective:
-            system = (
-                "You are a specialized assistant in food information engineering.\n\n\
-                Your task is to extract and return the nutritional components of a food item.\n\n\
-                STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
-                1. Use only the information explicitly present in the user-provided context.\n\
-                2. Do NOT invent, infer, estimate, or guess any nutrient, value, or unit.\n\
-                3. If the requested food does NOT exist in the context, reply EXACTLY:\n\
-                \"I don't know\"\n\
-                4. You should extract all the nutritional components corresponding to the user query.\n\
-                5. The output must be a python list of strings, and only that.\n\
-                6. Each element must follow this exact format:\n\
-                nutrient: value unit\n\
-                7. Example of a VALID output:\n\
-                ['iron: 1.42 mg', 'zinc: 1.11 mg',.... 'compN: valueN unitN']\n\
-                8. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
-                9. Do not include nutrient names without values or units.\n\
-                10. Do not reference ingredients, sources, or descriptions.\n\
-                11. Return only the final python list OR \"I don't know\" - nothing else."
-            )
-        else:
-            system = (
-                "You are a specialized assistant in food information engineering.\n\n\
-                Your task is to extract and return the nutritional components of a food item.\n\n\
-                STRICT RULES (MUST BE FOLLOWED EXACTLY):\n\
-                1. Use only the information explicitly present in the user-provided context.\n\
-                2. Do NOT invent, infer, estimate, or guess any nutrient, value, or unit.\n\
-                4. The output must be a python list of strings, and only that.\n\
-                5. Each element must follow this exact format:\n\
-                \"nutrient: value unit\"\n\
-                6. Example of a valid output:\n\
-                ['iron: 1.42 mg', 'zinc: 1.11 mg']\n\
-                7. Do not add explanations, comments, reasoning, headers, or any extra text.\n\
-                8. Do not include nutrient names without values or units.\n\
-                9. Do not reference ingredients, sources, or descriptions.\n\
-                10. Return only the final python list - nothing else."
-            )
-        return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    def predict_food_name(self, image_source: Union[str, UploadFile, BytesIO]) -> str:
+        """
+        Predict the name of a food item from an image input.
 
-    def _generate_components(self, prompt: str, is_rag: bool, selective: bool) -> str:
-        messages = (
-            self._messages_rag(prompt, selective)
-            if is_rag
-            else self._messages_no_rag(prompt, selective)
-        )
-        response = self._get_text_pipe()(messages)
-        try:
-            return response[0]["generated_text"][2]["content"].strip().strip(".")
-        except (KeyError, IndexError, TypeError):
-            return "I don't know"
+        Args:
+            image_source (Union[str, UploadFile, BytesIO]):
+                - str: Path to a local image file
+                - UploadFile: Uploaded image file (FastAPI)
+                - BytesIO: In-memory image bytes
 
-    # ------------------ Classification ------------------
+        Returns:
+            str: Predicted food class name (e.g., "pizza", "sushi", etc.)
+        """
 
-    def predict_food_name(self, image_source: Union[str, BytesIO]) -> str:
         return self.food_classifier.predict(image_source)
 
-    # ------------------ End-to-end pipelines ------------------
+    def use_model(self, query, is_rag: bool = False, is_selective: bool = False):
+        """
+        Args:
+            query (str): The input query to the model.
+
+            message_type (str): The type of message to choose.
+            is_selective (bool): Whether the response should be selective.
+        Returns:
+            str: The generated response from the model.
+        """
+
+        prompt = query
+
+        # If RAG is enabled, we need to search for relevant documents
+        messages = self.choose_message(
+            prompt,
+            is_rag=is_rag,
+            is_selective=is_selective,
+        )
+
+        # Generate a response
+        response = pipe(messages)
+
+        return response[0]["generated_text"][2]["content"].strip().strip(".")
+
+    def predict_with_image(
+        self,
+        input_file: str,
+        output_file: str,
+        is_rag: bool = False,
+        is_vllm: bool = True,
+    ):
+        df = load_input_dataframe(input_file)
+        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+            writer = csv.writer(outfile)
+            writer.writerow(["Food Name", "image", "components"])
+
+            for _, row in tqdm(
+                df.iterrows(),
+                total=len(df),
+                desc="Processing rows",
+                unit="row",
+            ):
+                name = str(row["name"]).strip()
+                image_path = str(row["image"]).strip()
+                print(image_path)
+
+                if is_rag:
+                    # If RAG is enabled, we need to search for relevant documents
+                    docs = self.rag.search_by_image(
+                        image_path,
+                        top_k=4,
+                        namespace="image",
+                    )
+                    query = self._format_context(
+                        docs,
+                        name,
+                        fallback="Information not found.",
+                    )
+                else:
+                    query = image_path
+
+                prompt = {
+                    "query": query,
+                    "image": image_path,
+                }
+
+                try:
+                    response_str = self.use_vllm_model(
+                        prompt,
+                        is_rag=is_rag,
+                        is_vllm=is_vllm,
+                    )
+                    if response_str.strip().startswith("[") and response_str.strip().endswith(
+                        "]"
+                    ):
+
+                        components = response_str
+                except Exception as e:
+                    print(f"Error processing {name}: {e}")
+                    components = []
+
+                writer.writerow([name, image_path, components])
+
+    def process_json_and_predict_old(
+        self,
+        input_file: str,
+        output_file: str,
+        is_rag: bool = False,
+        is_selective: bool = False,
+    ):
+        """
+        :param input_file: path of the input file
+        :param output_file: path of the output file
+        """
+        df = load_input_dataframe(input_file)
+        with open(output_file, "w", newline="", encoding="utf-8") as outfile:
+            writer = csv.writer(outfile)
+            writer.writerow(["id", "predicted_name", "components"])
+
+            for _, row in tqdm(
+                df.iterrows(),
+                total=len(df),
+                desc="Processing rows",
+                unit="row",
+            ):
+                food_id = f"{row['label']} - {row['image']}"
+                food_name_predicted = self.predict_food_name(row["image"])
+                if food_name_predicted.lower() != row["label"].lower():
+                    writer.writerow([food_id, food_name_predicted, "I don't know"])
+                else:
+                    print(
+                        f"predicted_food={food_name_predicted}, "
+                        f"target_food={row['label']}"
+                    )
+                    label = f"Food name: {food_name_predicted}"
+
+                    if is_rag:
+                        # If RAG is enabled, we need to search for relevant documents
+                        docs = self.rag.search_by_text(
+                            food_name_predicted,
+                            top_k=4,
+                            namespace="text",
+                        )
+                        query = self._format_context(
+                            docs,
+                            label,
+                            fallback="Information not found.",
+                        )
+                    else:
+                        query = (
+                            "Given this food name identify its main nutrients "
+                            "and their corresponding nutritional values in "
+                            "grams, milligrams, kcal etc. \n"
+                            f"{label}?"
+                        )
+
+                    try:
+                        response_str = self.use_model(
+                            query,
+                            is_rag=is_rag,
+                            is_selective=is_selective,
+                        )
+                        # response_dict = json.loads(response_str.response)
+                        # print(response_str)
+
+                        components = response_str
+                    except Exception as e:
+                        ingredients = f"Error: {e}"
+                        components = f"Error: {e}"
+
+                    writer.writerow([food_id, food_name_predicted, components])
 
     def process_json_and_predict(
         self,
@@ -358,103 +618,205 @@ class FoodAssistant:
         is_selective: bool = False,
         is_ablation_study: bool = False,
         rag_ratio: float = 0.2,
-    ) -> None:
-        df = pd.read_json(input_file)
+    ):
+        """
+        Progressive ablation study (cumulative RAG)
+
+        rag_ratio: 0.2, 0.4, 0.6, 0.8, 1.0
+        """
+
+        df = load_input_dataframe(input_file)
+
         n_total = len(df)
 
+        # ----------------------------
+        # Number of samples using RAG
+        # ----------------------------
+        n_rag = 0
+
         if is_ablation_study:
-            rag_ratio = max(0.0, min(1.0, rag_ratio))
             n_rag = int(n_total * rag_ratio)
-            print(f"[Ablation] Progressive RAG: {n_rag}/{n_total} ({rag_ratio * 100:.0f}%)")
-        else:
-            n_rag = 0
 
-        ensure_parent_dir(output_file)
+            print(
+                f"[Ablation] Progressive RAG: "
+                f"{n_rag}/{n_total} ({rag_ratio*100:.0f}%)"
+            )
 
+        # ----------------------------
+        # Write output
+        # ----------------------------
         with open(output_file, "w", newline="", encoding="utf-8") as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(["id", "predicted_name", "components", "used_rag"])
 
-            for idx, (_, row) in enumerate(tqdm(df.iterrows(), total=n_total, desc="Processing rows", unit="row")):
+            writer = csv.writer(outfile)
+            writer.writerow([
+                "id",
+                "predicted_name",
+                "components",
+                "used_rag",
+            ])
+
+            for idx, (_, row) in enumerate(
+                tqdm(
+                    df.iloc[0:].iterrows(),
+                    total=len(df.iloc[0:]),
+                    desc="Processing rows",
+                    unit="row",
+                )
+            ):
+
                 food_id = f"{row['label']} - {row['image']}"
 
-                try:
-                    predicted_name = self.predict_food_name(row["image"])
-                except Exception as exc:  # noqa: BLE001
-                    writer.writerow([food_id, "I don't know", f"Error: {exc}", False])
-                    continue
+                food_name_predicted = self.predict_food_name(
+                    row["image"]
+                )
 
-                # if predicted_name.lower() != str(row["label"]).lower():
-                #     writer.writerow([food_id, predicted_name, "I don't know", False])
-                #     continue
-
+                # Progressive RAG decision
                 if is_ablation_study:
                     use_rag_here = idx < n_rag
+                elif is_rag:
+                    use_rag_here = True
                 else:
-                    use_rag_here = is_rag
+                    use_rag_here = False
 
-                label = f"Food name: {predicted_name}"
+                # Wrong prediction
+                # if food_name_predicted.lower() != row["label"].lower():
 
+                #     writer.writerow([
+                #         food_id,
+                #         food_name_predicted,
+                #         "I don't know",
+                #         use_rag_here,
+                #     ])
+                #     continue
+
+                label = f"Food name: {food_name_predicted}"
+
+                # Build query
                 if use_rag_here:
-                    docs = self.rag.search_by_text(predicted_name, top_k=4, namespace="text")
-                    prompt = self._format_rag_context(docs, label)
+
+                    docs = self.rag.search_by_text(
+                        food_name_predicted,
+                        top_k=4,
+                        namespace="text",
+                    )
+
+                    query = self._format_context(
+                        docs,
+                        label,
+                        fallback="Information not found.",
+                    )
+
                 else:
-                    prompt = (
-                        "Given this food name identify its main nutrients and their corresponding "
-                        "nutritional values in grams, milligrams, kcal etc.\n"
+
+                    query = (
+                        "Given this food name identify its main nutrients "
+                        "and their corresponding nutritional values "
+                        "in grams, milligrams,  kcal etc.\n"
                         f"{label}?"
                     )
 
                 try:
-                    components = self._generate_components(prompt, is_rag=use_rag_here, selective=is_selective)
-                except Exception as exc:  # noqa: BLE001
-                    components = f"Error: {exc}"
 
-                writer.writerow([food_id, predicted_name, components, use_rag_here])
+                    response = self.use_model(
+                        query,
+                        is_rag=use_rag_here,
+                        is_selective=is_selective,
+                    )
 
-    def predict_with_semantic_search(self, input_file: str, output_file: str, top_k: int =1) -> None:
-        df = pd.read_json(input_file)
+                    components = response
 
-        ensure_parent_dir(output_file)
+                except Exception as e:
+
+                    components = f"Error: {e}"
+
+                writer.writerow([
+                    food_id,
+                    food_name_predicted,
+                    components,
+                    use_rag_here,
+                ])
+
+    def predict_with_semantic_search(self, input_file: str, output_file: str):
+        """
+        Process JSON input using search_first_by_image, extract predicted food_class and components,
+        and write results to CSV.
+
+        :param input_file: path of the input JSON file
+        :param output_file: path of the output CSV file
+        """
+        df = load_input_dataframe(input_file)
 
         with open(output_file, "w", newline="", encoding="utf-8") as outfile:
             writer = csv.writer(outfile)
             writer.writerow(["id", "predicted_name", "components"])
 
-            for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing rows", unit="row"):
+            for _, row in tqdm(
+                df.iterrows(),
+                total=len(df),
+                desc="Processing rows",
+                unit="row",
+            ):
                 food_id = f"{row['label']} - {row['image']}"
 
+                # Search for the first match by image
                 try:
-                    match = self.rag.search_topk_by_image(row["image"], top_k=top_k, namespace="image")
-                    if not match:
-                        writer.writerow([food_id, "I don't know", []])
-                        continue
+                    match = self.rag.search_first_by_image(
+                        row["image"],
+                        namespace="image",
+                    )
+                    if match is None:
+                        food_name_predicted = "I don't know"
+                        components_list = []
+                    else:
+                        # retrieve the label predicted and components from metadata
+                        food_name_predicted = match.get("food_class", "I don't know")
 
-                    predicted_name = match.get("food_class", "I don't know")
-                    components_raw = str(match.get("components", "[]"))
-                    parsed = safe_literal_eval_list(components_raw)
+                        # Extract and format components
+                        components_raw = match.get("components", "[]")
+                        try:
+                            # Safely evaluate the string representation of the list
+                            components_data = ast.literal_eval(components_raw)
+                            components_list = [
+                                f"{item['name']}: {item['value']} {item['unit']}"
+                                for item in components_data
+                            ]
+                        except Exception as e:
+                            components_list = [f"Error parsing components: {e}"]
+                except Exception as e:
+                    food_name_predicted = "I don't know"
+                    components_list = [f"Error searching image: {e}"]
 
-                    formatted_components: List[str] = []
-                    for item in parsed:
-                        if isinstance(item, dict):
-                            name = item.get("name", "unknown")
-                            value = item.get("value", "")
-                            unit = item.get("unit", "")
-                            formatted_components.append(f"{name}: {value} {unit}".strip())
-
-                    writer.writerow([food_id, predicted_name, formatted_components])
-
-                except Exception as exc:  # noqa: BLE001
-                    writer.writerow([food_id, "I don't know", [f"Error searching image: {exc}"]])
+                writer.writerow([food_id, food_name_predicted, components_list])
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Food Multimodal RAG Pipeline")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Food Multimodal RAG Pipeline"
+    )
 
-    parser.add_argument("--index-name", default="icml-paper", type=str, required=True, help="Pinecone index name")
-    parser.add_argument("--input-file", type=str, required=True, help="Path to input JSON file")
-    parser.add_argument("--output-file", type=str, required=True, help="Path to output CSV file")
+    # ------------------ Core ------------------
+    parser.add_argument(
+        "--index-name",
+        type=str,
+        required=True,
+        help="Pinecone index name",
+    )
 
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        required=True,
+        help="Path to input JSON file",
+    )
+
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        required=True,
+        help="Path to output CSV file",
+    )
+
+    # ------------------ Modes ------------------
     parser.add_argument(
         "--mode",
         type=str,
@@ -462,46 +824,61 @@ def parse_args() -> argparse.Namespace:
         default="no_rag",
         help="Execution mode",
     )
-    parser.add_argument("--selective", action="store_true", help="Enable selective prompting")
-    parser.add_argument("--ablation", action="store_true", help="Enable progressive RAG ablation study")
-    parser.add_argument("--rag-ratio", type=float, default=0.2, help="RAG ratio for ablation (0.0 to 1.0)")
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--selective",
+        action="store_true",
+        help="Enable selective prompting",
+    )
+
+    parser.add_argument(
+        "--ablation",
+        action="store_true",
+        help="Enable progressive RAG ablation study",
+    )
+
+    parser.add_argument(
+        "--rag-ratio",
+        type=float,
+        default=0.2,
+        help="RAG ratio for ablation (0.2, 0.4, 0.6, 0.8, 1.0)",
+    )
+
+    return parser
 
 
-def main() -> None:
-    load_dotenv()
-    set_seed(42)
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
-    hub_token = os.getenv("HUB_TOKEN")
-    if hub_token:
-        login(token=hub_token)
-
-    args = parse_args()
-
+    # ------------------ Init RAG ------------------
     rag = RAGRecipe(index_name=args.index_name)
     rag.load_clip()
     rag.set_text_model()
 
     assistant = FoodAssistant(rag=rag)
 
-    ensure_parent_dir(args.output_file)
+    os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
 
+    # ------------------ Execution ------------------
     if args.mode == "semantic_search":
-        assistant.predict_with_semantic_search(input_file=args.input_file, output_file=args.output_file)
+
+        assistant.predict_with_semantic_search(
+            input_file=args.input_file,
+            output_file=args.output_file,
+        )
+
     else:
+
+        is_rag = args.mode == "rag"
+
         assistant.process_json_and_predict(
             input_file=args.input_file,
             output_file=args.output_file,
-            is_rag=args.mode == "rag",
+            is_rag=is_rag,
             is_selective=args.selective,
             is_ablation_study=args.ablation,
             rag_ratio=args.rag_ratio,
         )
-
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
 
     print("\nPipeline finished successfully.")
 

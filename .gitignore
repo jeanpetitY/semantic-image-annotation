@@ -41,3 +41,4 @@ evaluation/old.py
 import_tools/recipe/
 inference/recipe/
 store/
+finetuning/model_selection*
