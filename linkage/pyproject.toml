@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-linkage"
+version = "0.1.0"
+description = "Link food images to textual descriptions and export JSONL records."
+requires-python = ">=3.10,<3.14"
+dependencies = []
+
+[project.scripts]
+food-linkage = "linkage.main:main"
+
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["linkage", "linkage.*"]

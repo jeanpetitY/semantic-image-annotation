@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -27,14 +28,10 @@ from huggingface_hub import login
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
-from import_tools.utils import (
-    uecfood256_labels,
-    food101_labels,
-    afd_labels,
-    fruitveg81_labels,
-)
-
-from ask.chat import AskFoodSearch
+try:
+    from .ask.chat import AskFoodSearch
+except ImportError:
+    from ask.chat import AskFoodSearch
 
 
 # ---------------------------------------------------------------------
@@ -50,6 +47,51 @@ BASE_IMAGE_URL = os.getenv("BASE_IMAGE_URL")
 
 if USDA_API_KEY is None:
     raise EnvironmentError("USDA_KEY is missing in environment variables.")
+
+
+def load_dataset_labels(dataset_dir: str) -> List[str]:
+    """Load class labels from an imagefolder-style dataset directory."""
+    dataset_path = Path(dataset_dir)
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
+
+    return sorted(
+        entry.name
+        for entry in dataset_path.iterdir()
+        if entry.is_dir()
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Enrich a food-label dataset with USDA information."
+    )
+    parser.add_argument(
+        "--dataset-dir",
+        default="dataset/image/not_merged/uecfood256/train",
+        help="Imagefolder-style dataset directory containing one subdirectory per class.",
+    )
+    parser.add_argument(
+        "--output-file",
+        default="json/old/uecfood256_usda_enriched.json",
+        help="Path to the enriched JSON output file.",
+    )
+    parser.add_argument(
+        "--image-base-url",
+        default=None,
+        help="Base URL used to build image links in the output.",
+    )
+    parser.add_argument(
+        "--cache-file",
+        default="usda_cache.json",
+        help="Path to the local USDA cache file.",
+    )
+    parser.add_argument(
+        "--fruit-veg",
+        action="store_true",
+        help="Use the raw-fruit-and-vegetable retrieval mode.",
+    )
+    return parser.parse_args()
 
 
 # ---------------------------------------------------------------------
@@ -511,17 +553,25 @@ def main() -> None:
     Execute dataset enrichment.
     """
 
+    args = parse_args()
+
     asker = AskFoodSearch()
 
-    service = USDAFoodEnrichmentService(asker)
+    service = USDAFoodEnrichmentService(
+        asker,
+        cache_file=args.cache_file,
+    )
 
-    output_uec = "json/old/uecfood256_usda_enriched.json"
+    image_base_url = args.image_base_url
+    if image_base_url is None and BASE_IMAGE_URL:
+        dataset_name = Path(args.dataset_dir).parent.name
+        image_base_url = f"{BASE_IMAGE_URL}/{dataset_name}/"
 
     service.process_dataset(
-        labels=uecfood256_labels,
-        output_file=output_uec,
-        is_fruit_veg=False,
-        image_base_url=f"{BASE_IMAGE_URL}/uecfood256/",
+        labels=load_dataset_labels(args.dataset_dir),
+        output_file=args.output_file,
+        is_fruit_veg=args.fruit_veg,
+        image_base_url=image_base_url,
     )
 
 

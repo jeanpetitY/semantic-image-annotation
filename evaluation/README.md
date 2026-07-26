@@ -69,6 +69,10 @@ The prediction `components` field may contain:
 - a list of 2-tuples
 - the exact string `I don't know`
 
+For ground-truth files, `components` may also be stored in ontology-style JSON
+objects with `rdfs:label`, `hasUnit`, and `hasValue`. The evaluator normalizes
+that structure before computing metrics.
+
 ## Usage
 
 Standard evaluation:

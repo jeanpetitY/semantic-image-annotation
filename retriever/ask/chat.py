@@ -1,10 +1,15 @@
 import json
+import os
 from typing import Dict, List
+
+from dotenv import load_dotenv  # type: ignore
 from openai import OpenAI
 from pydantic import BaseModel
-import os
-from dotenv import load_dotenv # type: ignore
-from load_model import load_client
+
+try:
+    from .load_model import load_client
+except ImportError:
+    from load_model import load_client
 
 load_dotenv()
 
@@ -144,9 +149,10 @@ class AskFoodSearch:
         print(f"✅ File updated incrementally: {output_file_path}")
 
         
-askfood = AskFoodSearch(model_name="gpt-4o-mini")
 
-askfood.update_food_file_with_food_type(
-    input_file_path="json/old/fruitveg81_usda_enriched.json",
-    output_file_path="json/old/fruitveg81_usda_enriched_updated.json"
-)
+if __name__ == "__main__":
+    askfood = AskFoodSearch(model_name="gpt-4o-mini")
+    askfood.update_food_file_with_food_type(
+        input_file_path="json/old/fruitveg81_usda_enriched.json",
+        output_file_path="json/old/fruitveg81_usda_enriched_updated.json"
+    )

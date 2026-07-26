@@ -10,7 +10,11 @@ import pandas as pd
 
 
 HAS_IMAGE_KEY = "http://example.org/food#hasImage"
+HAS_COMPONENTS_KEY = "http://example.org/food#hasComponent"
+HAS_TEXT_DESCRIPTION_KEY = "http://example.org/food#hasTextDescription"
 RDFS_LABEL_KEY = "http://www.w3.org/2000/01/rdf-schema#label"
+HAS_UNIT_KEY = "http://example.org/food#hasUnit"
+HAS_VALUE_KEY = "http://example.org/food#hasValue"
 
 
 def _extract_first_value(value):
@@ -85,7 +89,10 @@ def load_ground_truth_items(input_file: str) -> list[dict]:
                 {
                     "label": _extract_label_from_jsonld_identifier(item),
                     "image": str(image_path),
-                    "components": item.get("components", []),
+                    "components": item.get(HAS_COMPONENTS_KEY, item.get("components", [])),
+                    "text_description": _extract_first_value(
+                        item.get(HAS_TEXT_DESCRIPTION_KEY)
+                    ),
                 }
             )
             continue
@@ -219,11 +226,27 @@ class Evaluator:
         return self.normalize_component_list(normalized_items)
 
     def normalize_component_list(self, components):
-        return [
-            str(component).strip().strip('"').strip("'").lower()
-            for component in components
-            if str(component).strip()
-        ]
+        normalized_components = []
+        for component in components:
+            if isinstance(component, dict):
+                label = _extract_first_value(component.get(RDFS_LABEL_KEY))
+                unit = _extract_first_value(component.get(HAS_UNIT_KEY))
+                value = _extract_first_value(component.get(HAS_VALUE_KEY))
+
+                if isinstance(value, dict):
+                    value = value.get("@value")
+
+                if label is not None and value is not None:
+                    normalized_components.append(
+                        f"{str(label).strip()}: {str(value).strip()} {str(unit).strip()}".strip().lower()
+                    )
+                    continue
+
+            component_text = str(component).strip().strip('"').strip("'").lower()
+            if component_text:
+                normalized_components.append(component_text)
+
+        return normalized_components
 
     def align_records(self, gt_records, pred_records):
         gt_by_id = {record["id"]: record for record in gt_records}

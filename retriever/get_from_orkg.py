@@ -1,7 +1,9 @@
-from orkg import ORKG
+import argparse
 import json
-from dotenv import load_dotenv
 import os
+
+from dotenv import load_dotenv
+from orkg import ORKG
 
 # Load environment variables
 load_dotenv()
@@ -16,12 +18,44 @@ FOOD_CLASS = "C123036"
 COMPONENT_CLASS = "C34009"
 
 # Output file
-OUTPUT_FILE = "exported_usda_food1.json"
+OUTPUT_FILE = "exported_foods.json"
 
-# Initialize ORKG client
-orkg = ORKG(host=ORKG_HOST, creds=(EMAIL, PASSWORD))
-resource_ids = ["R717607", "R723954", "R715068", "R721951"]
-# resource_ids = ["R717607"]
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Export food resources from ORKG."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["resource-ids", "class-scan"],
+        default="resource-ids",
+        help="Export from explicit resource IDs or by scanning the food class.",
+    )
+    parser.add_argument(
+        "--output-file",
+        default="exported_foods.json",
+        help="Path to the output JSON file.",
+    )
+    parser.add_argument(
+        "--resource-ids",
+        nargs="+",
+        default=["R717607", "R723954", "R715068", "R721951"],
+        help="ORKG resource IDs used in resource-ids mode.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional limit on the number of exported foods.",
+    )
+    parser.add_argument(
+        "--host",
+        default=ORKG_HOST,
+        help="ORKG host URL.",
+    )
+    return parser.parse_args()
+
+
+orkg = None
 
 
 
@@ -347,7 +381,19 @@ def fetch_and_stream_foods(limit=None):
     print(f"Export finished. {count} food items written to {OUTPUT_FILE}")
 
 
-if __name__ == "__main__":
+def main():
+    global orkg, OUTPUT_FILE
+
+    args = parse_args()
+    OUTPUT_FILE = args.output_file
+    orkg = ORKG(host=args.host, creds=(EMAIL, PASSWORD))
+
     print("Fetching food data from ORKG...")
-    fetch_foods_by_resource_ids(resource_ids)
-    # fetch_and_stream_foods(limit=None)
+    if args.mode == "resource-ids":
+        fetch_foods_by_resource_ids(args.resource_ids, limit=args.limit)
+    else:
+        fetch_and_stream_foods(limit=args.limit)
+
+
+if __name__ == "__main__":
+    main()

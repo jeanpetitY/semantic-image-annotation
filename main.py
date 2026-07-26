@@ -1,7 +1,4 @@
-from tools/helper import helper
-from eval
+from preprocessing.helper import helper
 
 if __name__ == "__main__":
-    """ Please prepare a switch case here to run the different tools as needed. """
-    
     helper()

@@ -1,25 +1,30 @@
 import csv
+import json
+import os
 import random
 import re
-from flask import json
-import os
 import shutil
-import pandas as pd
-from pathlib import Path
-from datasets import load_dataset
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import List, Dict, Tuple, Set
-from dataset_splitter import DatasetSplitter
-from dataset_balancer import DatasetBalancer
+
+import pandas as pd
+from datasets import load_dataset
 from PIL import Image
 
+try:
+    from .dataset_balancer import DatasetBalancer
+    from .dataset_splitter import DatasetSplitter
+except ImportError:
+    from dataset_balancer import DatasetBalancer
+    from dataset_splitter import DatasetSplitter
 
 
-fruitveg81_labels = os.listdir("dataset/image/not_merged/fruitveg81/train")
-food101_labels = os.listdir("dataset/image/not_merged/food101/train")
-uecfood256_labels = os.listdir("dataset/image/not_merged/uecfood256/train")
-afd_labels = os.listdir("dataset/image/not_merged/AFD/train")
-merged_labels = os.listdir("dataset/image/merged/train")
+def _list_dir_labels(path: str) -> List[str]:
+    dataset_path = Path(path)
+    if not dataset_path.exists():
+        return []
+    return sorted(entry.name for entry in dataset_path.iterdir() if entry.is_dir())
 
 
 class Helper:
@@ -74,11 +79,11 @@ class Helper:
         Check and clean labels for all datasets and print a summary.
         """
         datasets = {
-            "UECFood256": uecfood256_labels,
-            "AFD": afd_labels,
-            "Food101": food101_labels,
-            "FruitVeg81": fruitveg81_labels,
-            "Merged": merged_labels,
+            "UECFood256": _list_dir_labels("dataset/image/not_merged/uecfood256/train"),
+            "AFD": _list_dir_labels("dataset/image/not_merged/AFD/train"),
+            "Food101": _list_dir_labels("dataset/image/not_merged/food101/train"),
+            "FruitVeg81": _list_dir_labels("dataset/image/not_merged/fruitveg81/train"),
+            "Merged": _list_dir_labels("dataset/image/merged/train"),
         }
 
         summary = {}
@@ -443,10 +448,10 @@ class Helper:
 
         return 0.0
         
-    def compare_food_labels(
+    def fuzzy_match_food_labels(
         self,
-        food101_labels: List[str],
-        uecfood256_labels: List[str],
+        reference_labels: List[str],
+        candidate_labels: List[str],
         threshold: float = 0.8,
     ) -> Dict[str, List]:
         """
@@ -455,8 +460,8 @@ class Helper:
           - fuzzy matches based on SequenceMatcher similarity
 
         Args:
-            food101_labels (List[str]): Labels from Food101 dataset.
-            uecfood256_labels (List[str]): Labels from UECFood256 dataset.
+            reference_labels (List[str]): Reference label list.
+            candidate_labels (List[str]): Candidate label list to compare.
             threshold (float): Similarity threshold for fuzzy matching.
 
         Returns:
@@ -465,18 +470,18 @@ class Helper:
                 "fuzzy_matches": List[Tuple[str, str, float]]
             }
         """
-        normalized_food101 = [self.clean_label(n) for n in food101_labels]
-        normalized_uec = [self.clean_label(n) for n in uecfood256_labels]
+        normalized_reference = [self.clean_label(n) for n in reference_labels]
+        normalized_candidates = [self.clean_label(n) for n in candidate_labels]
 
-        exact_matches = sorted(set(normalized_food101) & set(normalized_uec))
+        exact_matches = sorted(set(normalized_reference) & set(normalized_candidates))
 
         fuzzy_matches: List[Tuple[str, str, float]] = []
 
-        for f in normalized_food101:
+        for f in normalized_reference:
             if f in exact_matches:
                 continue
 
-            for u in normalized_uec:
+            for u in normalized_candidates:
                 ratio = SequenceMatcher(None, f, u).ratio()
                 score = round(ratio, 2)
 
@@ -562,7 +567,7 @@ class Helper:
 
         Rules:
         - Food101 is the reference dataset
-        - Exact + fuzzy matches (via compare_food_labels) are considered equivalent
+        - Exact + fuzzy matches (via fuzzy_match_food_labels) are considered equivalent
         - For equivalent labels, keep Food101 and skip others
         - Non-equivalent labels are merged
 
@@ -622,9 +627,9 @@ class Helper:
             print(f"{name} labels: {len(ds_labels)}")
 
             # Semantic comparison against Food101
-            comp = self.compare_food_labels(
-                food101_labels=f101_labels,
-                uecfood256_labels=ds_labels,
+            comp = self.fuzzy_match_food_labels(
+                reference_labels=f101_labels,
+                candidate_labels=ds_labels,
                 threshold=threshold,
             )
 
@@ -739,9 +744,9 @@ class Helper:
         using exact and fuzzy semantic matching.
         """
 
-        comp = self.compare_food_labels(
-            food101_labels=reference_labels,
-            uecfood256_labels=other_labels,
+        comp = self.fuzzy_match_food_labels(
+            reference_labels=reference_labels,
+            candidate_labels=other_labels,
             threshold=threshold,
         )
 
@@ -1124,69 +1129,4 @@ def helper():
 
 
 
-# if __name__ == "__main__":
-#     helper()
-    
-
 helper = Helper()
-
-# AFD dataset
-helper.build_multimodal_dataset(
-    json_source="json/new/data_retrieve_from_orkg.json",
-    train_dir="dataset/image/not_merged/AFD/test",
-    output_file="dataset/multimodal/not_merged/test/AFD_test.json",
-)
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/AFD/train",
-#     output_file="dataset/multimodal/not_merged/train/AFD_train.json",
-# )
-
-# FruitVeg81 dataset
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/fruitveg81/test",
-#     output_file="dataset/multimodal/not_merged/test/fruitveg81_test.json",
-# )
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/fruitveg81/train",
-#     output_file="dataset/multimodal/not_merged/train/fruitveg81_train.json",
-# )
-
-# UECFood256 dataset
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/uecfood256/test",
-#     output_file="dataset/multimodal/not_merged/test/uecfood256_test.json",
-# )
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/uecfood256/train",
-#     output_file="dataset/multimodal/not_merged/train/uecfood256_train.json",
-# )
-
-# Food101 dataset
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/food101/test",
-#     output_file="dataset/multimodal/not_merged/test/food101_test.json",
-# )
-
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/not_merged/food101/train",
-#     output_file="dataset/multimodal/not_merged/train/food101_train.json",
-# )
-
-# Merged dataset
-# helper.build_multimodal_dataset(
-#     json_source="json/new/data_retrieve_from_orkg.json",
-#     train_dir="dataset/image/merged/test",
-#     output_file="dataset/multimodal/merged/merged_test.json",
-# )
-helper.build_multimodal_dataset(
-    json_source="json/new/data_retrieve_from_orkg.json",
-    train_dir="dataset/image/merged/train",
-    output_file="dataset/multimodal/merged/merged_train.json",
-)

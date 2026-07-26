@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-retriever"
+version = "0.1.0"
+description = "Retrieval module for USDA enrichment and ORKG export."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "dotenv==0.9.9",
+    "huggingface_hub>=0.35.3",
+    "openai==1.76.0",
+    "orkg>=0.3.0",
+    "pydantic",
+    "requests==2.32.5",
+    "torch==2.7.1",
+    "transformers==4.57.1",
+]
+
+[project.scripts]
+food-retriever = "retriever.main:main"
+food-retriever-usda = "retriever.get_from_usda:main"
+food-retriever-orkg = "retriever.get_from_orkg:main"
+
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["retriever", "retriever.*"]

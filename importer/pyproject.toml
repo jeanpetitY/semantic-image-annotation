@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-importer"
+version = "0.1.0"
+description = "Importer module for loading USDA-enriched data into ORKG."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "dotenv==0.9.9",
+    "orkg>=0.3.0",
+]
+
+[project.scripts]
+food-importer = "importer.import_data:main"
+
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["importer", "importer.*"]

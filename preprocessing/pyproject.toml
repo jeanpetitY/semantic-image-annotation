@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-preprocessing"
+version = "0.1.0"
+description = "Pre-processing utilities for dataset preparation and multimodal data construction."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "datasets==4.3.0",
+    "pandas>=2.3.3",
+    "pillow==11.1.0",
+]
+
+[project.scripts]
+food-preprocessing = "preprocessing.main:main"
+
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["preprocessing", "preprocessing.*"]

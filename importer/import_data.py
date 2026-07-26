@@ -1,26 +1,9 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-"""
-ORKG - USDA Dataset Importer
-
-This module imports USDA-enriched food datasets into
-the Open Research Knowledge Graph (ORKG).
-
-Features:
-- Resource deduplication
-- Class-based typing
-- Nutrient sub-resources
-- Dataset linking
-- Safe statement creation
-
-"""
-
 import json
 import os
 import re
 import sys
 import time
+import argparse
 from typing import Dict, List, Optional, Tuple
 
 from difflib import SequenceMatcher
@@ -451,25 +434,52 @@ class USDAORKGImporter:
 # ---------------------------------------------------------------------
 
 def main() -> None:
-
-    HOST = "https://orkg.org"
+    parser = argparse.ArgumentParser(
+        description="Import a USDA-enriched dataset into ORKG."
+    )
+    parser.add_argument(
+        "--host",
+        default="https://orkg.org",
+        help="ORKG host URL.",
+    )
+    parser.add_argument(
+        "--input-file",
+        default="json/old/uecfood256_usda_enriched.json",
+        help="Path to the USDA-enriched JSON file.",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        default="uecfood256",
+        help="Dataset name suffix used for generated ORKG resources.",
+    )
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=75,
+        help="Start index within the loaded dataset.",
+    )
+    parser.add_argument(
+        "--end",
+        type=int,
+        default=90,
+        help="End index within the loaded dataset.",
+    )
+    args = parser.parse_args()
 
     orkg_client = ORKGClient(
-        host=HOST,
+        host=args.host,
         email=EMAIL,
         password=PASSWORD
     )
 
     importer = USDAORKGImporter(orkg_client)
 
-    importer.load_dataset(
-        "json/old/uecfood256_usda_enriched.json"
-    )
+    importer.load_dataset(args.input_file)
 
     importer.import_dataset(
-        dataset_name="uecfood256",
-        start=75,
-        end=90
+        dataset_name=args.dataset_name,
+        start=args.start,
+        end=args.end
     )
 
 
