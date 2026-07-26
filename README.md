@@ -1,181 +1,55 @@
-# 🍽️ Experimentation for Semantic Image Annotation
+# Semantic Food Image Annotation and Nutrient Inference
 
-This project focuses on **automatic semantic annotation of food images** and **nutritional knowledge augmentation** using multiple food datasets:
+This repository contains the codebase used to build, enrich, link, model, and evaluate a semantified food-image dataset for nutrient-aware inference.
 
-- **Food101**
-- **FruitVeg81**
-- **AFD**
-- **UECFOOD256**
+The project combines:
 
-The pipeline supports:
+- food-image datasets such as `Food-101`, `FruitVeg81`, `AFD`, and `UECFood256`
+- nutritional enrichment from external sources
+- knowledge-graph structuring and image-to-description linkage
+- vision-model fine-tuning for food recognition
+- nutrient generation with `no_rag`, `rag`, semantic retrieval, and ablation settings
 
-- Food image classification  
-- Nutrient prediction  
-- Knowledge-augmented inference (RAG)  
-- USDA-based nutritional enrichment  
+## Pipeline Overview
 
----
+The full workflow is organized into dedicated modules:
 
-# ⚙️ Requirements
+1. `preprocessing/`: prepare image datasets, normalize labels, create splits, balance classes, and analyze dataset layouts
+2. `retriever/`: retrieve nutritional information from USDA and export structured resources from ORKG
+3. `importer/`: import semantified food descriptions into ORKG
+4. `linkage/`: link each image to its semantic food description and export JSON-LD annotations
+5. `excerpt/`: create a compact `excerpt_dataset/` for inspection, inference, and evaluation
+6. `finetuning/`: fine-tune food-classification backbones such as CLIP, BEiT, and DINOv3
+7. `inference/`: run food classification and nutrient inference
+8. `evaluation/`: evaluate nutrient predictions against JSON-LD ground truth
+9. `push_to_hub/`: publish trained model artifacts
 
-To reproduce the experiments, we recommend the following hardware:
+## Repository Layout
 
-- **GPU**: NVIDIA RTX-class GPU (24GB VRAM)
-- **RAM**: 48 GB
-- **CPU**: 12 cores
+- [`preprocessing`](preprocessing/README.md): dataset preparation and analysis
+- [`retriever`](retriever/README.md): USDA enrichment and ORKG export
+- [`importer`](importer/README.md): ORKG import pipeline
+- [`linkage`](linkage/README.md): image-to-description JSON-LD linkage
+- [`excerpt`](excerpt/README.md): excerpt-dataset construction
+- [`finetuning`](finetuning/README.md): food-recognition training workflows
+- [`inference`](inference/README.md): classification, nutrient generation, semantic retrieval, and ablation
+- [`evaluation`](evaluation/README.md): prediction evaluation metrics and CLI
+- [`push_to_hub`](push_to_hub/README.md): model publication utilities
 
-### Software
+## Excerpt Dataset
 
-- **Python ≥ 3.10**
+When generated, `excerpt_dataset/` provides a compact end-to-end example shared across modules:
 
-If Python is not installed:
+- `excerpt_dataset/images`: image classification and dataset analysis
+- `excerpt_dataset/annotation.jsonld`: nutrient inference and evaluation
 
-👉 https://www.python.org/downloads/
+The exact commands for creating and using this excerpt are documented in the module READMEs, especially:
 
-Install dependencies:
+- [`excerpt/README.md`](excerpt/README.md)
+- [`inference/README.md`](inference/README.md)
+- [`evaluation/README.md`](evaluation/README.md)
+- [`preprocessing/README.md`](preprocessing/README.md)
 
-```bash
-pip install -r requirements.txt
-```
+## Reproducibility
 
-## Project Structure
-.
-├── evaluation        # Evaluation scripts and metrics
-├── finetuning        # Model training scripts
-├── inference         # Classification & nutrient prediction
-├── push_to_hub       # HuggingFace model publishing tools
-├── annotation        # USDA nutritional annotation/enrichment pipeline
-├── retrieve          # Other retrieval utilities
-├── tools             # Utility functions
-
-
-## Fine-Tuning
-The finetuning folder contains the code used to fine-tune the food classification model.
-
-You can launch the training process with the following command:
-
-you can run the code by run this command in your terminal
-```bash
-python finetuning/train_classifier.py \
-  --model_name microsoft/beit-base-patch16-384 \
-  --data_dir dataset/image/merged \
-  --output_dir ./model_saved/food-model \
-  --epochs 8 \
-  --batch_size 32 \
-  --lr 5e-5 \
-  --weight_decay 0.01 \
-  --warmup_ratio 0.05 \
-  --fp16
-```
-
-## Inference
-The inference folder contain to file: one for classify food image and the other to predict nutrient from food image.
-
-### Inference for classify food image
-To classify and evaluate our food images test dataset, you can run the following command
-
-```bash
-python inference/food_classifier.py \
-  --model-dir ./path_to_model_name \
-  --data-dir path_to_test_data \
-  --result-dir results \
-  --mode semantic
-```
-or 
-```bash
-python inference/food_classifier.py \
-  --model-dir ./path_to_model_name \
-  --data-dir dpath_to_test_data\
-  --result-dir results \
-  --limit 500
-```
-the mode argument can only take two values semantic(in case your dataset is UECFOOD) and strict for the other dataset.
-
-### Inference for nutrient generation 
-  - Without Knowledge augmentation
-      ```bash
-      python inference/nutrient_generator.py \
-    --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
-    --output-file results/text-model/vision-model/no_rag/example.csv \
-    --mode no_rag \
-    --selective
-    ```
-  - With Knowledge Augmentation
-    ```bash
-    python inference/nutrient_generator.py \
-    --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
-    --output-file results/text-model/vision-model/rag/example.csv \
-    --mode rag \
-    --selective
-    ```
-  - Case: Ablation Study
-    ```bash
-    python inference/ablation.py \
-    --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
-    --output-file results/text-model/vision-model/ablation/example.csv \
-    --selective \
-    --rag-ratio 0.4
-    ```
-
-  - case: Baseline with clip-based approach(semantic searc)
-    ```bash
-    python inference/semantic_retrieval.py \
-    --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
-    --output-file results/text-model/vision-model/semantic_search/example.csv \
-    ```
-
-### Using the released excerpt dataset
-
-When `excerpt_dataset/` has been generated, it can be reused across modules:
-
-- `excerpt_dataset/images` for image classification and dataset analysis
-- `excerpt_dataset/annotation.jsonld` for nutrient inference and evaluation
-
-Examples:
-
-```bash
-uv --project preprocessing run food-preprocessing analyze-layout \
-  --dataset-path excerpt_dataset/images
-```
-
-```bash
-uv --project inference run food-inference generate \
-  --index-name example-index \
-  --input-file excerpt_dataset/annotation.jsonld \
-  --output-file results/text-model/vision-model/excerpt_rag.csv \
-  --mode rag \
-  --selective
-```
-
-```bash
-uv --project inference run food-inference ablation \
-  --index-name example-index \
-  --input-file excerpt_dataset/annotation.jsonld \
-  --output-file results/text-model/vision-model/excerpt_ablation.csv \
-  --rag-ratio 0.2 \
-  --selective
-```
-
-```bash
-uv --project evaluation run food-evaluation \
-  --ground-json excerpt_dataset/annotation.jsonld \
-  --prediction-csv results/text-model/vision-model/excerpt_rag.csv
-```
-
-## Retrieval
-This folder contains one folder one fold to get nutrient data from USDA 
-
-you can run this command to if you want to perform this task
-```bash
-cd annotation
-uv run image-annotation \
-  --food-labels ../dataset/image/not_merged/fruitveg81/test \
-  --output-file outputs/fruitveg81/fruitveg81_usda.json \
-  --not-annotated-file outputs/fruitveg81/fruitveg81_not_annotated.json \
-  --fruit-veg \
-  --image-base-url https://my-bucket/fruitveg81/
-```
+Each module is documented and executable independently. For environment setup, commands, inputs, and outputs, use the README inside the relevant module rather than the repository root.
