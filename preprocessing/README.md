@@ -89,7 +89,6 @@ The module provides reproducible utilities for:
 - preparing train/test splits
 - balancing classes toward a target number of images per class
 - merging image datasets
-- constructing multimodal image-plus-nutrient datasets
 - computing dataset statistics
 
 ## Fuzzy Label Matching
@@ -135,15 +134,6 @@ Check label normalization across datasets:
 
 ```bash
 uv run food-preprocessing check-labels
-```
-
-Build a multimodal dataset:
-
-```bash
-uv run food-preprocessing build-multimodal \
-  --json-source json/new/data_retrieve_from_orkg.json \
-  --train-dir dataset/image/merged/train \
-  --output-file dataset/multimodal/merged/merged_train.json
 ```
 
 Create a train/test split:
@@ -193,7 +183,6 @@ Depending on the command, this module may produce:
 - split datasets under user-specified `train/` and `test/` folders
 - balanced datasets under a user-specified output directory
 - merged image datasets
-- multimodal JSON files linking images to nutrient annotations
 - printed dataset statistics and label-matching summaries
 
 The module does not impose a single output root; outputs are controlled by the

@@ -62,6 +62,14 @@ uv run food-retriever-usda \
   --output-file json/old/example_usda_enriched.json
 ```
 
+Inspect retrieval coverage against a dataset label directory:
+
+```bash
+uv run food-retriever-stats \
+  json/old/example_usda_enriched.json \
+  dataset/image/not_merged/example/test
+```
+
 ORKG export from explicit resource IDs:
 
 ```bash
@@ -97,6 +105,7 @@ The retriever produces:
 
 - USDA-enriched JSON files from dataset labels
 - ORKG-exported JSON files from existing graph resources
+- retrieval-coverage summaries printed to the console through `food-retriever-stats`
 
 Output locations are fully controlled by the CLI arguments.
 

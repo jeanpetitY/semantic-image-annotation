@@ -21,10 +21,12 @@ dependencies = [
 image-annotation = "main:main"
 image-annotation-apply-corrections = "apply_corrections:main"
 image-annotation-eval = "evaluation:main"
+image-annotation-stats = "annotation_stats:main"
 
 [tool.setuptools]
 py-modules = [
     "apply_corrections",
+    "annotation_stats",
     "evaluation",
     "main",
     "get_from_usda",

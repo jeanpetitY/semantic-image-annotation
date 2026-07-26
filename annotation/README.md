@@ -15,6 +15,7 @@ It can:
 
 - `get_from_usda.py`: USDA enrichment implementation.
 - `apply_corrections.py`: applies human-in-the-loop annotation corrections.
+- `annotation_stats.py`: compares annotated labels with dataset labels and reports missing coverage.
 - `evaluation.py`: strict annotation evaluation implementation.
 - `main.py`: executable entry point for this module.
 - `pyproject.toml`: local `uv` project configuration for annotation only.
@@ -78,6 +79,12 @@ Show CLI help:
 
 ```bash
 uv run image-annotation --help
+```
+
+Show annotation-coverage stats help:
+
+```bash
+uv run image-annotation-stats --help
 ```
 
 ## Usage
@@ -173,6 +180,14 @@ uv run image-annotation-apply-corrections \
   --corrections evaluation/fruitveg81_human_corrections.json \
   --output outputs/fruitveg81/fruitveg81_usda_corrected.json \
   --fetch-usda-details
+```
+
+Inspect annotation coverage against a dataset label directory:
+
+```bash
+uv run image-annotation-stats \
+  outputs/uecfood256/uecfood256_usda_raw.json \
+  ../dataset/image/not_merged/uecfood256/test
 ```
 
 Evaluate corrected annotations:

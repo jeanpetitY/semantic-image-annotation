@@ -50,6 +50,9 @@ The module expects:
 The class directory name is matched using the same label normalization strategy
 as the existing preprocessing code.
 
+In the intended pipeline, the source JSON file is the output produced by
+`retriever/get_from_orkg.py`.
+
 ## Output Format
 
 The module writes one ontology-style JSON object per line.
@@ -85,6 +88,11 @@ uv run food-linkage \
   --image-dir ../dataset/image/not_merged/AFD/test \
   --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonl
 ```
+
+uv run food-linkage \
+  --json-source ../json/new/data_retrieve_from_orkg.json \
+  --image-dir ../dataset/image/not_merged/AFD/test \
+  --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonl
 
 From the repository root:
 

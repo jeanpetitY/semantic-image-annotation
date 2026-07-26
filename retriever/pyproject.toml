@@ -22,6 +22,7 @@ dependencies = [
 food-retriever = "retriever.main:main"
 food-retriever-usda = "retriever.get_from_usda:main"
 food-retriever-orkg = "retriever.get_from_orkg:main"
+food-retriever-stats = "retriever.retrieval_stats:main"
 
 [tool.setuptools]
 package-dir = {"" = ".."}

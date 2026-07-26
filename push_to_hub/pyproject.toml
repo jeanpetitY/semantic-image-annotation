@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-push-to-hub"
+version = "0.1.0"
+description = "Push a fine-tuned food model directory to the Hugging Face Hub."
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "dotenv==0.9.9",
+    "huggingface_hub>=0.35.3",
+]
+
+[project.scripts]
+food-push-to-hub = "push_to_hub.utils:main"
+
+[tool.setuptools]
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["push_to_hub", "push_to_hub.*"]
