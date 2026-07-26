@@ -4,6 +4,98 @@ import csv
 import json
 import os
 import re
+from pathlib import Path
+
+import pandas as pd
+
+
+HAS_IMAGE_KEY = "http://example.org/food#hasImage"
+RDFS_LABEL_KEY = "http://www.w3.org/2000/01/rdf-schema#label"
+
+
+def _extract_first_value(value):
+    if isinstance(value, list) and value:
+        first_item = value[0]
+        if isinstance(first_item, dict):
+            return first_item.get("@value")
+        return first_item
+    return value
+
+
+def _extract_label_from_jsonld_identifier(record: dict) -> str:
+    identifier = str(record.get("@id", ""))
+    type_values = record.get("@type", [])
+
+    candidates = []
+    if "#" in identifier:
+        candidates.append(identifier.split("#", 1)[1])
+    if isinstance(type_values, list) and type_values:
+        first_type = str(type_values[0])
+        if "#" in first_type:
+            candidates.append(first_type.split("#", 1)[1])
+        else:
+            candidates.append(first_type)
+
+    for candidate in candidates:
+        if "_Img_" in candidate:
+            prefix = candidate.split("_Img_", 1)[0]
+        elif candidate.endswith("_Images"):
+            prefix = candidate[: -len("_Images")]
+        else:
+            continue
+
+        if "_" in prefix:
+            return prefix.rsplit("_", 1)[0]
+        return prefix
+
+    label_value = _extract_first_value(record.get(RDFS_LABEL_KEY))
+    if label_value is not None:
+        return str(label_value)
+
+    return identifier
+
+
+def load_ground_truth_items(input_file: str) -> list[dict]:
+    input_path = Path(input_file)
+
+    if input_path.suffix.lower() == ".jsonl":
+        data = pd.read_json(input_file, lines=True).to_dict(orient="records")
+    else:
+        with open(input_file, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+    if not isinstance(data, list):
+        raise ValueError("Ground-truth input must contain a list of records.")
+
+    normalized_items = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        if "label" in item and "image" in item:
+            normalized_items.append(item)
+            continue
+
+        if "@id" in item and HAS_IMAGE_KEY in item:
+            image_path = _extract_first_value(item.get(HAS_IMAGE_KEY))
+            if not image_path:
+                continue
+
+            normalized_items.append(
+                {
+                    "label": _extract_label_from_jsonld_identifier(item),
+                    "image": str(image_path),
+                    "components": item.get("components", []),
+                }
+            )
+            continue
+
+        raise ValueError(
+            "Unsupported ground-truth format. Expected records with "
+            "'label'/'image' or JSON-LD records with image metadata."
+        )
+
+    return normalized_items
 
 
 class Evaluator:
@@ -48,8 +140,7 @@ class Evaluator:
         return f"{item.get('label', '')} - {item.get('image', '')}"
 
     def load_ground_truth_records(self, json_path):
-        with open(json_path, "r", encoding="utf-8") as file:
-            data = json.load(file)
+        data = load_ground_truth_items(json_path)
 
         records = []
         for item in data:
@@ -390,7 +481,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate nutrient predictions.")
     parser.add_argument(
         "--ground-json",
-        default="dataset/multimodal/not_merged/test/AFD_test.json",
+        default="dataset/multimodal/not_merged/test/example_test.jsonl",
     )
     parser.add_argument(
         "--prediction-csv",
@@ -401,7 +492,7 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     evaluator = Evaluator()
     print(evaluator.evaluate(
@@ -410,3 +501,7 @@ if __name__ == "__main__":
         output_file=args.output_file,
         is_ablation=args.is_ablation,
     ))
+
+
+if __name__ == "__main__":
+    main()
