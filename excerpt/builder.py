@@ -15,7 +15,21 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FOOD_NS = "http://example.org/food#"
+RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label"
+RDFS_CLASS = "http://www.w3.org/2000/01/rdf-schema#Class"
+RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
 HAS_IMAGE_KEY = "http://example.org/food#hasImage"
+HAS_COMPONENT_KEY = "http://example.org/food#hasComponent"
+HAS_INGREDIENT_KEY = "http://example.org/food#hasIngredient"
+HAS_TEXT_DESCRIPTION_KEY = "http://example.org/food#hasTextDescription"
+HAS_ORKG_LINK_KEY = "http://example.org/food#hasORKGLink"
+HAS_USDA_LINK_KEY = "http://example.org/food#hasUSDALink"
+HAS_UNIT_KEY = "http://example.org/food#hasUnit"
+HAS_VALUE_KEY = "http://example.org/food#hasValue"
+FOOD_COMPONENT_NAME_KEY = "http://example.org/food#foodComponentName"
+XSD_FLOAT = "http://www.w3.org/2001/XMLSchema#float"
+XSD_URI = "http://www.w3.org/2001/XMLSchema#anyURI"
 
 
 def resolve_path(path_str: str) -> Path:
@@ -199,6 +213,256 @@ class DatasetExcerptBuilder:
             updated[HAS_IMAGE_KEY] = [{"@value": rewritten_path}]
         return updated
 
+    def parse_component_text(self, component_text: str) -> dict | None:
+        match = re.fullmatch(
+            r"\s*(.*?):\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(.+?)\s*",
+            str(component_text),
+        )
+        if not match:
+            return None
+        name = match.group(1).strip()
+        try:
+            value = float(match.group(2))
+        except ValueError:
+            return None
+        unit = match.group(3).strip()
+        return {"name": name, "value": value, "unit": unit}
+
+    def extract_component_dicts(self, record: dict) -> list[dict]:
+        if HAS_COMPONENT_KEY in record:
+            components = []
+            for item in record.get(HAS_COMPONENT_KEY, []):
+                if not isinstance(item, dict):
+                    continue
+                label_values = item.get(RDFS_LABEL, [])
+                unit_values = item.get(HAS_UNIT_KEY, [])
+                value_values = item.get(HAS_VALUE_KEY, [])
+                name = (
+                    label_values[0].get("@value")
+                    if isinstance(label_values, list) and label_values
+                    else None
+                )
+                unit = (
+                    unit_values[0].get("@value")
+                    if isinstance(unit_values, list) and unit_values
+                    else None
+                )
+                value = None
+                if isinstance(value_values, list) and value_values:
+                    raw_value = value_values[0]
+                    if isinstance(raw_value, dict):
+                        raw_value = raw_value.get("@value")
+                    try:
+                        value = float(raw_value)
+                    except (TypeError, ValueError):
+                        value = None
+                if name is not None and value is not None:
+                    components.append({"name": str(name), "value": value, "unit": str(unit)})
+            return components
+
+        components = []
+        for item in record.get("components", []):
+            if isinstance(item, dict) and {"name", "value", "unit"}.issubset(item):
+                try:
+                    value = float(item["value"])
+                except (TypeError, ValueError):
+                    continue
+                components.append(
+                    {
+                        "name": str(item["name"]),
+                        "value": value,
+                        "unit": str(item["unit"]),
+                    }
+                )
+                continue
+            parsed = self.parse_component_text(str(item))
+            if parsed is not None:
+                components.append(parsed)
+        return components
+
+    def extract_ingredients(self, record: dict) -> list[str]:
+        if HAS_INGREDIENT_KEY in record:
+            ingredients = []
+            for item in record.get(HAS_INGREDIENT_KEY, []):
+                if isinstance(item, dict):
+                    value = item.get("@value")
+                else:
+                    value = item
+                if value:
+                    ingredients.append(str(value).strip())
+            return ingredients
+        return [str(item).strip() for item in record.get("ingredients", []) if str(item).strip()]
+
+    def build_text_description(self, label: str, ingredients: list[str], components: list[dict]) -> str:
+        parts = [label]
+        if ingredients:
+            parts.append("Ingredients: " + ", ".join(ingredients))
+        if components:
+            component_text = "; ".join(
+                f"{item['name']}: {item['value']} {item['unit']}" for item in components
+            )
+            parts.append("Nutritional components: " + component_text)
+        return ". ".join(parts)
+
+    def build_component_record(
+        self,
+        class_name: str,
+        dataset_name: str,
+        food_label: str,
+        component: dict,
+    ) -> dict:
+        component_slug = self.clean_label(component["name"])
+        return {
+            "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Comp_{component_slug}",
+            "@type": [f"{FOOD_NS}{class_name}_{dataset_name}_Components"],
+            FOOD_COMPONENT_NAME_KEY: [{"@value": str(component["name"])}],
+            HAS_UNIT_KEY: [{"@value": str(component["unit"])}],
+            HAS_VALUE_KEY: [{"@type": XSD_FLOAT, "@value": str(float(component["value"]))}],
+            RDFS_LABEL: [{"@value": f"{component_slug}_{food_label}"}],
+        }
+
+    def build_ontology_records(
+        self,
+        excerpt_records: list[dict],
+        selected_class_sources: dict[str, list[str]],
+    ) -> list[dict]:
+        ontology_records: list[dict] = []
+        dataset_classes_added: set[str] = set()
+        class_blocks_added: set[tuple[str, str]] = set()
+
+        grouped_by_class: dict[str, list[dict]] = defaultdict(list)
+        for record in excerpt_records:
+            class_name = self.extract_record_class_name(record)
+            if class_name:
+                grouped_by_class[class_name].append(record)
+
+        for class_name, records in grouped_by_class.items():
+            dataset_name = self.clean_label(selected_class_sources.get(class_name, ["dataset"])[0] or "dataset")
+            if dataset_name not in dataset_classes_added:
+                ontology_records.append(
+                    {
+                        "@id": f"{FOOD_NS}{dataset_name}",
+                        "@type": [RDFS_CLASS],
+                    }
+                )
+                dataset_classes_added.add(dataset_name)
+
+            class_key = (class_name, dataset_name)
+            if class_key not in class_blocks_added:
+                representative = records[0]
+                representative_ingredients = self.extract_ingredients(representative)
+                ontology_records.extend(
+                    [
+                        {
+                            "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Food",
+                            "@type": [RDFS_CLASS],
+                            RDFS_LABEL: [{"@value": class_name}],
+                            RDFS_SUBCLASS_OF: [{"@id": f"{FOOD_NS}{dataset_name}"}],
+                        },
+                        {
+                            "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Images",
+                            "@type": [RDFS_CLASS],
+                            RDFS_LABEL: [{"@value": "Images"}],
+                            RDFS_SUBCLASS_OF: [{"@id": f"{FOOD_NS}{class_name}_{dataset_name}_Food"}],
+                        },
+                        {
+                            "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Components",
+                            "@type": [RDFS_CLASS],
+                            RDFS_LABEL: [{"@value": "Components"}],
+                            RDFS_SUBCLASS_OF: [{"@id": f"{FOOD_NS}{class_name}_{dataset_name}_Food"}],
+                        },
+                    ]
+                )
+                if representative_ingredients:
+                    ontology_records.append(
+                        {
+                            "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Ingredients",
+                            "@type": [RDFS_CLASS],
+                            RDFS_LABEL: [{"@value": "Ingredients"}],
+                            RDFS_SUBCLASS_OF: [{"@id": f"{FOOD_NS}{class_name}_{dataset_name}_Food"}],
+                        }
+                    )
+                class_blocks_added.add(class_key)
+
+            representative = records[0]
+            components = self.extract_component_dicts(representative)
+            ingredients = self.extract_ingredients(representative)
+            text_description = self.build_text_description(class_name, ingredients, components)
+            food_record = {
+                "@id": f"{FOOD_NS}{class_name}_{dataset_name}",
+                "@type": [f"{FOOD_NS}{class_name}_{dataset_name}_Food"],
+                RDFS_LABEL: [{"@value": class_name}],
+                HAS_IMAGE_KEY: [],
+                HAS_COMPONENT_KEY: [],
+            }
+
+            if ingredients:
+                food_record[HAS_INGREDIENT_KEY] = []
+
+            if representative.get("description"):
+                food_record[HAS_TEXT_DESCRIPTION_KEY] = [{"@value": str(representative["description"])}]
+            else:
+                food_record[HAS_TEXT_DESCRIPTION_KEY] = [{"@value": text_description}]
+
+            if representative.get("orkg_link"):
+                food_record[HAS_ORKG_LINK_KEY] = [{"@type": XSD_URI, "@value": str(representative["orkg_link"])}]
+            if representative.get("usda_link"):
+                food_record[HAS_USDA_LINK_KEY] = [{"@type": XSD_URI, "@value": str(representative["usda_link"])}]
+
+            for component in components:
+                component_record = self.build_component_record(
+                    class_name=class_name,
+                    dataset_name=dataset_name,
+                    food_label=class_name,
+                    component=component,
+                )
+                ontology_records.append(component_record)
+                food_record[HAS_COMPONENT_KEY].append({"@id": component_record["@id"]})
+
+            for ingredient in ingredients:
+                ingredient_slug = self.clean_label(ingredient)
+                ingredient_record = {
+                    "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Ing_{ingredient_slug}",
+                    "@type": [f"{FOOD_NS}{class_name}_{dataset_name}_Ingredients"],
+                    RDFS_LABEL: [{"@value": ingredient}],
+                }
+                ontology_records.append(ingredient_record)
+                food_record[HAS_INGREDIENT_KEY].append({"@id": ingredient_record["@id"]})
+
+            for image_index, record in enumerate(records):
+                image_path = self.extract_image_path(record)
+                if not image_path:
+                    continue
+                image_record = {
+                    "@id": f"{FOOD_NS}{class_name}_{dataset_name}_Img_{image_index}",
+                    "@type": [f"{FOOD_NS}{class_name}_{dataset_name}_Images"],
+                    RDFS_LABEL: [{"@value": f"Image_{image_index}"}],
+                    HAS_IMAGE_KEY: [{"@value": image_path}],
+                    HAS_TEXT_DESCRIPTION_KEY: [{"@value": text_description}],
+                    HAS_COMPONENT_KEY: [
+                        self.build_component_record(
+                            class_name=class_name,
+                            dataset_name=dataset_name,
+                            food_label=class_name,
+                            component=component,
+                        )
+                        for component in components
+                    ],
+                }
+                if ingredients:
+                    image_record[HAS_INGREDIENT_KEY] = [{"@value": ingredient} for ingredient in ingredients]
+                if record.get("orkg_link"):
+                    image_record[HAS_ORKG_LINK_KEY] = [{"@type": XSD_URI, "@value": str(record["orkg_link"])}]
+                if record.get("usda_link"):
+                    image_record[HAS_USDA_LINK_KEY] = [{"@type": XSD_URI, "@value": str(record["usda_link"])}]
+
+                ontology_records.append(image_record)
+                food_record[HAS_IMAGE_KEY].append({"@id": image_record["@id"]})
+
+            ontology_records.append(food_record)
+
+        return ontology_records
+
     def is_augmented_image(self, image_path: Path) -> bool:
         return image_path.name.lower().startswith("aug_")
 
@@ -331,8 +595,13 @@ class DatasetExcerptBuilder:
                 seen_classes.add(class_name)
                 missing_classes.discard(class_name)
 
+        ontology_records = self.build_ontology_records(
+            excerpt_records=excerpt_records,
+            selected_class_sources=selected_class_sources,
+        )
+
         with open(output_annotation_path, "w", encoding="utf-8") as output_file:
-            json.dump(excerpt_records, output_file, ensure_ascii=False)
+            json.dump(ontology_records, output_file, ensure_ascii=False, indent=2)
 
         annotation_size = (
             self.allocated_size(output_annotation_path)
@@ -352,6 +621,7 @@ class DatasetExcerptBuilder:
             "total_source_records_selected": total_source_records_selected,
             "total_source_images_selected": total_source_images_selected,
             "records_written": written_records,
+            "ontology_records_written": len(ontology_records),
             "images_copied": copied_images,
             "skipped_size_limit": skipped_size_limit,
             "max_size_mb": max_size_mb,

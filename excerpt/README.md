@@ -87,7 +87,7 @@ images/<class>/<filename>
 
 All other JSON-LD fields are preserved.
 
-The total excerpt size is capped with `--max-size-mb` and defaults to `45`.
+The total excerpt size is capped with `--max-size-mb` and defaults to `50`.
 The excerpt is then filled progressively and may keep only part of the images
 from the selected classes in order to stay within the size budget.
 
@@ -99,7 +99,7 @@ From inside the module directory:
 uv run food-excerpt \
   --output-dir ../excerpt_dataset \
   --num-classes 20 \
-  --max-size-mb 45
+  --max-size-mb 50
 ```
 
 From the repository root:
