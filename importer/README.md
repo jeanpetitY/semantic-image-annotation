@@ -18,6 +18,19 @@ This module imports USDA-enriched food data into ORKG.
 
 - `EMAIL`
 - `PASSWORD`
+- `ORKG_HOST`
+- `ORKG_FOOD_CLASS_PRIMARY`
+- `ORKG_FOOD_CLASS_SECONDARY`
+- `ORKG_COMPONENT_CLASS`
+- `ORKG_DATASET_CLASS`
+- `ORKG_PROP_HAS_COMPONENT`
+- `ORKG_PROP_COMPONENT_NAME`
+- `ORKG_PROP_COMPONENT_VALUE`
+- `ORKG_PROP_NAME`
+- `ORKG_PROP_SOURCE`
+- `ORKG_PROP_IMAGE`
+- `ORKG_PROP_PORTION`
+- `ORKG_DATASET_RESOURCE`
 
 ## Setup With uv
 
@@ -71,7 +84,8 @@ The key parameters controlling a reproducible import are:
 ## Reproducibility Notes
 
 - Import behavior depends on the exact content of the input JSON file and the
-  target ORKG instance.
+  target ORKG instance and the deployment-specific class/predicate identifiers
+  supplied through the environment.
 - Exact replay therefore requires the same input file, the same ORKG host, and
   credentials with comparable permissions.
 - The importer writes to an external knowledge-graph service, so reproducibility

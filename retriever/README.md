@@ -6,7 +6,7 @@ evaluation.
 It supports two workflows:
 
 - USDA enrichment from dataset labels
-- ORKG export from existing ORKG resources
+- ORKG export from existing graph resources
 
 ## Files
 
@@ -31,6 +31,9 @@ Depending on the workflow, the module may require:
 - `OPENAI_API_KEY`
 - `EMAIL`
 - `PASSWORD`
+- `ORKG_HOST`
+- `ORKG_FOOD_CLASS_ID`
+- `ORKG_COMPONENT_CLASS_ID`
 
 ## Setup With uv
 
@@ -70,12 +73,12 @@ uv run food-retriever-stats \
   dataset/image/not_merged/example/test
 ```
 
-ORKG export from explicit resource IDs:
+ORKG export from explicit entity IDs:
 
 ```bash
 uv run food-retriever-orkg \
-  --mode resource-ids \
-  --resource-ids R000001 R000002 \
+  --mode entity-ids \
+  --entity-ids ENTITY_001 ENTITY_002 \
   --output-file exported_foods.json
 ```
 
@@ -97,7 +100,8 @@ USDA enrichment expects:
 ORKG export expects:
 
 - valid ORKG credentials
-- either an explicit list of resource IDs or a class-scan configuration
+- either an explicit list of entity IDs or a class-scan configuration
+- deployment-specific class identifiers supplied through environment variables
 
 ## Outputs
 
@@ -114,6 +118,6 @@ Output locations are fully controlled by the CLI arguments.
 - USDA enrichment depends on the upstream USDA API, optional LLM-based semantic
   validation, and the exact dataset label directory provided as input.
 - ORKG export depends on the current state of the ORKG instance and the
-  resource-selection mode used for the export.
+  entity-selection mode used for the export.
 - Exact replay therefore requires the same credentials, the same external
   services, the same input dataset labels, and the same command arguments.

@@ -16,7 +16,7 @@ from huggingface_hub import HfApi, create_repo, login
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
     PROJECT_ROOT
-    / "model_saved/finetuning/facebook-dinov3-vitl16-pretrain-lvd1689m/run 3: eps_8"
+    / "model_saved/finetuning/example-dinov3-backbone/run_3_epoch_8"
 )
 
 
@@ -122,7 +122,7 @@ def push_model_to_hub(
 
     print(
         f"Detected format: {model_format}. "
-        f"Uploaded {model_dir} to https://huggingface.co/{repo_id}"
+        f"Uploaded {model_dir} to the configured Hugging Face repository '{repo_id}'."
     )
 
 

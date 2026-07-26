@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-/nfs/home/jeanpetityvelosb/project/python/Dataset}"
+cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
 
 RUNNER="${RUNNER:-uv}"
 
@@ -17,12 +17,16 @@ if [[ "${RUNNER}" == "uv" ]]; then
 fi
 
 if [[ "${RUNNER}" == "python" ]]; then
-  source /nfs/home/jeanpetityvelosb/miniconda3/etc/profile.d/conda.sh
+  if [[ -n "${CONDA_EXE:-}" ]]; then
+    source "$(dirname "$(dirname "${CONDA_EXE}")")/etc/profile.d/conda.sh"
+  elif [[ -f "${HOME}/miniconda3/etc/profile.d/conda.sh" ]]; then
+    source "${HOME}/miniconda3/etc/profile.d/conda.sh"
+  fi
   conda activate "${CONDA_ENV:-rag_env}"
 fi
 
 MODEL_KEY="${MODEL_KEY:-dinov3}"
-MODEL_NAME="${MODEL_NAME:-facebook/dinov3-vitl16-pretrain-lvd1689m}"
+MODEL_NAME="${MODEL_NAME:-org/example-dinov3-backbone}"
 DATA_DIR="${DATA_DIR:-dataset/image/merged}"
 EPOCHS="${EPOCHS:-8}"
 BATCH_SIZE="${BATCH_SIZE:-16}"

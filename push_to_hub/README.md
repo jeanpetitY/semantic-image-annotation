@@ -108,7 +108,7 @@ Custom DINOv3 example:
 
 ```bash
 REPO_NAME=org/example-dinov3-model \
-MODEL_PATH=model_saved/finetuning/facebook-dinov3-vitl16-pretrain-lvd1689m/run\ 1:\ ep_8_0 \
+MODEL_PATH=model_saved/finetuning/example-dinov3-backbone/run\ 1:\ ep_8_0 \
 uv --project push_to_hub run food-push-to-hub
 ```
 

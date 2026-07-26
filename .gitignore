@@ -42,3 +42,4 @@ import_tools/recipe/
 inference/recipe/
 store/
 finetuning/model_selection*
+annotation/

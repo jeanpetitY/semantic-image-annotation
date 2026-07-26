@@ -177,7 +177,7 @@ class FoodClassifier:
                 raise RuntimeError(
                     "DINOv3 requires a recent transformers version. "
                     "Install/use transformers>=4.57.1 before loading "
-                    "yvelos/dinov3-food-389-v1."
+                    "the exported food-recognition checkpoint."
                 ) from exc
             raise
 

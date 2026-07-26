@@ -8,6 +8,7 @@ Paper reference:
 import argparse
 import json
 import os
+import hashlib
 
 from dotenv import load_dotenv
 from orkg import ORKG
@@ -18,11 +19,12 @@ load_dotenv()
 EMAIL = os.getenv("EMAIL")
 PASSWORD = os.getenv("PASSWORD")
 
-ORKG_HOST = "https://orkg.org"
+ORKG_HOST = os.getenv("ORKG_HOST", "https://example.org/kg")
 
-# ORKG resource classes
-FOOD_CLASS = "C123036"
-COMPONENT_CLASS = "C34009"
+# Graph class identifiers are injected through environment variables so no
+# deployment-specific IDs are hard-coded in the public code.
+FOOD_CLASS = os.getenv("ORKG_FOOD_CLASS_ID", "CLASS_FOOD_PLACEHOLDER")
+COMPONENT_CLASS = os.getenv("ORKG_COMPONENT_CLASS_ID", "CLASS_COMPONENT_PLACEHOLDER")
 
 # Output file
 OUTPUT_FILE = "exported_foods.json"
@@ -33,9 +35,9 @@ def parse_args():
     )
     parser.add_argument(
         "--mode",
-        choices=["resource-ids", "class-scan"],
-        default="resource-ids",
-        help="Export from explicit resource IDs or by scanning the food class.",
+        choices=["entity-ids", "resource-ids", "class-scan"],
+        default="entity-ids",
+        help="Export from explicit graph entity IDs or by scanning the configured food class.",
     )
     parser.add_argument(
         "--output-file",
@@ -43,10 +45,11 @@ def parse_args():
         help="Path to the output JSON file.",
     )
     parser.add_argument(
+        "--entity-ids",
         "--resource-ids",
         nargs="+",
-        default=["R717607", "R723954", "R715068", "R721951"],
-        help="ORKG resource IDs used in resource-ids mode.",
+        default=[],
+        help="Graph entity IDs used in explicit-ID export mode.",
     )
     parser.add_argument(
         "--limit",
@@ -57,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--host",
         default=ORKG_HOST,
-        help="ORKG host URL.",
+        help="Knowledge-graph host URL.",
     )
     return parser.parse_args()
 
@@ -170,7 +173,7 @@ def parse_ingredient_statements(ingredient_id):
     If not found, the resource label is used as a fallback.
 
     Args:
-        ingredient_id (str): ORKG resource ID of the ingredient.
+        ingredient_id (str): Graph entity ID of the ingredient.
 
     Returns:
         str: Ingredient label.
@@ -205,7 +208,7 @@ def parse_food_resource(resource_id):
     Reconstruct all information related to a single food resource.
 
     Args:
-        resource_id (str): ORKG resource ID of the food.
+        resource_id (str): Graph entity ID of the food.
 
     Returns:
         dict: Structured food data.
@@ -213,7 +216,7 @@ def parse_food_resource(resource_id):
     statements = orkg.statements.get_by_subject(resource_id)
 
     food_data = {
-        "id": f"{ORKG_HOST}/resource/{resource_id}",
+        "source_record_id": f"record_{hashlib.sha1(resource_id.encode('utf-8')).hexdigest()[:12]}",
         "food": [],
         "components": [],
         "ingredients": [],
@@ -265,11 +268,11 @@ def parse_food_resource(resource_id):
 
 def fetch_foods_by_resource_ids(resource_ids, limit=None):
     """
-    Fetch food resources from ORKG using an explicit list of resource IDs
+    Fetch food resources from ORKG using an explicit list of entity IDs
     and export them in the same JSON format as class-based export.
 
     Args:
-        resource_ids (List[str]): List of ORKG resource IDs.
+        resource_ids (List[str]): List of graph entity IDs.
         limit (int, optional): Maximum number of resources to export.
 
     Returns:
@@ -312,13 +315,13 @@ def fetch_foods_by_resource_ids(resource_ids, limit=None):
                 file.flush()
 
                 count += 1
-                print(f"Saved resource {resource_id} [{count}]")
+                print(f"Saved entity [{count}]")
 
                 if limit and count >= limit:
                     break
 
             except Exception as error:
-                print(f"Error processing {resource_id}: {error}")
+                print(f"Error processing one explicit entity: {error}")
 
         file.write("]")
 
@@ -371,7 +374,7 @@ def fetch_and_stream_foods(limit=None):
                 file.flush()
 
                 count += 1
-                print(f"Saved {resource.get('label', 'unknown')} ({resource_id}) [{count}]")
+                print(f"Saved {resource.get('label', 'unknown')} [{count}]")
 
                 if limit and count >= limit:
                     break
@@ -392,8 +395,8 @@ def main():
     orkg = ORKG(host=args.host, creds=(EMAIL, PASSWORD))
 
     print("Fetching food data from ORKG...")
-    if args.mode == "resource-ids":
-        fetch_foods_by_resource_ids(args.resource_ids, limit=args.limit)
+    if args.mode in {"entity-ids", "resource-ids"}:
+        fetch_foods_by_resource_ids(args.entity_ids, limit=args.limit)
     else:
         fetch_and_stream_foods(limit=args.limit)
 

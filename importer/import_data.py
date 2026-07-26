@@ -30,6 +30,8 @@ PASSWORD = os.getenv("PASSWORD")
 if not EMAIL or not PASSWORD:
     raise EnvironmentError("Missing ORKG credentials")
 
+ORKG_HOST = os.getenv("ORKG_HOST", "https://example.org/kg")
+
 
 # ---------------------------------------------------------------------
 # ORKG Client Wrapper
@@ -199,22 +201,25 @@ class USDAORKGImporter:
     Imports USDA enriched dataset into ORKG.
     """
 
-    # ORKG CLASS IDS (Centralized)
-    FOOD_CLASSES = ["C123036", "C77009"]
-    COMPONENT_CLASS = ["C34009"]
-    DATASET_CLASS = ["C14025"]
+    # Deployment-specific class and predicate identifiers are injected through
+    # environment variables so no concrete graph IDs are published here.
+    FOOD_CLASSES = [
+        os.getenv("ORKG_FOOD_CLASS_PRIMARY", "CLASS_FOOD_PRIMARY_PLACEHOLDER"),
+        os.getenv("ORKG_FOOD_CLASS_SECONDARY", "CLASS_FOOD_SECONDARY_PLACEHOLDER"),
+    ]
+    COMPONENT_CLASS = [os.getenv("ORKG_COMPONENT_CLASS", "CLASS_COMPONENT_PLACEHOLDER")]
+    DATASET_CLASS = [os.getenv("ORKG_DATASET_CLASS", "CLASS_DATASET_PLACEHOLDER")]
 
-    # PROPERTY IDS
-    PROP_HAS_COMPONENT = "P62073"
-    PROP_COMPONENT_NAME = "P62093"
-    PROP_COMPONENT_VALUE = "P5086"
+    PROP_HAS_COMPONENT = os.getenv("ORKG_PROP_HAS_COMPONENT", "PROP_HAS_COMPONENT_PLACEHOLDER")
+    PROP_COMPONENT_NAME = os.getenv("ORKG_PROP_COMPONENT_NAME", "PROP_COMPONENT_NAME_PLACEHOLDER")
+    PROP_COMPONENT_VALUE = os.getenv("ORKG_PROP_COMPONENT_VALUE", "PROP_COMPONENT_VALUE_PLACEHOLDER")
 
-    PROP_NAME = "P183114"
-    PROP_SOURCE = "P183112"
-    PROP_IMAGE = "P142026"
-    PROP_PORTION = "P20080"
+    PROP_NAME = os.getenv("ORKG_PROP_NAME", "PROP_NAME_PLACEHOLDER")
+    PROP_SOURCE = os.getenv("ORKG_PROP_SOURCE", "PROP_SOURCE_PLACEHOLDER")
+    PROP_IMAGE = os.getenv("ORKG_PROP_IMAGE", "PROP_IMAGE_PLACEHOLDER")
+    PROP_PORTION = os.getenv("ORKG_PROP_PORTION", "PROP_PORTION_PLACEHOLDER")
 
-    DATASET_RESOURCE = "wikidata:Q7866384"
+    DATASET_RESOURCE = os.getenv("ORKG_DATASET_RESOURCE", "DATASET_RESOURCE_PLACEHOLDER")
 
     def __init__(self, orkg: ORKGClient) -> None:
 
@@ -444,12 +449,12 @@ class USDAORKGImporter:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import a USDA-enriched dataset into ORKG."
+        description="Import a USDA-enriched dataset into a configured knowledge-graph deployment."
     )
     parser.add_argument(
         "--host",
-        default="https://orkg.org",
-        help="ORKG host URL.",
+        default=ORKG_HOST,
+        help="Knowledge-graph host URL.",
     )
     parser.add_argument(
         "--input-file",
@@ -459,7 +464,7 @@ def main() -> None:
     parser.add_argument(
         "--dataset-name",
         default="uecfood256",
-        help="Dataset name suffix used for generated ORKG resources.",
+        help="Dataset name suffix used for generated graph resources.",
     )
     parser.add_argument(
         "--start",
