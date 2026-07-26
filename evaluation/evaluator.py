@@ -149,10 +149,9 @@ def load_ground_truth_items(input_file: str) -> list[dict]:
             )
             continue
 
-        raise ValueError(
-            "Unsupported ground-truth format. Expected records with "
-            "'label'/'image' or JSON-LD records with image metadata."
-        )
+        # Ontology class declarations and other non-image records are ignored
+        # so evaluation can operate on richer JSON-LD files opened in Protégé.
+        continue
 
     return normalized_items
 

@@ -85,8 +85,8 @@ Each linked component record includes:
 ```bash
 uv run food-linkage \
   --json-source ../json/new/data_retrieve_from_orkg.json \
-  --image-dir ../dataset/image/not_merged/AFD/test \
-  --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonld
+  --image-dir ../dataset/image/merged/test \
+  --output-file ../dataset/multimodal/merged/merged_test.jsonld
 ```
 From the repository root:
 
