@@ -1,3 +1,10 @@
+"""CLI entry point for preprocessing and dataset analysis.
+
+Paper reference:
+- Dataset-construction pipeline covering normalization, split creation,
+  balancing, and summary analysis before downstream linkage and evaluation.
+"""
+
 import argparse
 
 from preprocessing.dataset_analysis import analyze_dataset_layout
@@ -66,6 +73,8 @@ def main():
     helper_instance = Helper()
 
     if args.command == "check-labels":
+        # Label normalization is the first harmonization step before merging
+        # datasets that originate from different naming conventions.
         print(helper_instance.check_all_datasets())
         return
 
@@ -97,7 +106,7 @@ def main():
     if args.command == "analyze-dataset":
         print(
             helper_instance.analyze_image_dataset(
-                dataset_path=args.dataset_path,
+                dataset_root=args.dataset_path,
                 portion=args.portion,
             )
         )

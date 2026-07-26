@@ -1,3 +1,10 @@
+"""Evaluate semantified nutrient-generation outputs.
+
+Paper reference:
+- Evaluation section comparing ungrounded generation, semantic retrieval, and
+  KG-grounded generation on the semantified food datasets.
+"""
+
 import argparse
 import ast
 import csv
@@ -106,13 +113,12 @@ def _extract_label_from_jsonld_identifier(record: dict) -> str:
 
 
 def load_ground_truth_items(input_file: str) -> list[dict]:
+    # Paper evaluation: normalize the semantified JSON-LD records into the
+    # common label/image/components view consumed by the metrics.
     input_path = resolve_input_path(input_file)
 
-    if input_path.suffix.lower() == ".jsonl":
-        data = pd.read_json(input_path, lines=True).to_dict(orient="records")
-    else:
-        with open(input_path, "r", encoding="utf-8") as file:
-            data = json.load(file)
+    with open(input_path, "r", encoding="utf-8") as file:
+        data = json.load(file)
 
     if not isinstance(data, list):
         raise ValueError("Ground-truth input must contain a list of records.")
@@ -485,6 +491,8 @@ class Evaluator:
     # ------------------ Evaluation ------------------
 
     def evaluate(self, ground_json, prediction_csv, output_file=None, is_ablation=False):
+        # Paper evaluation protocol: align model outputs with semantified food
+        # records, then compute food and nutrient-generation metrics.
         resolved_ground_json = str(resolve_input_path(ground_json))
         resolved_prediction_csv = str(resolve_input_path(prediction_csv))
         resolved_output_file = (
@@ -567,7 +575,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate nutrient predictions.")
     parser.add_argument(
         "--ground-json",
-        default="dataset/multimodal/not_merged/test/example_test.jsonl",
+        default="dataset/multimodal/not_merged/test/example_test.jsonld",
     )
     parser.add_argument(
         "--prediction-csv",

@@ -1,14 +1,8 @@
-"""
-USDA Food Data Enrichment Service
+"""USDA-based nutrient enrichment for food classes.
 
-This module provides a complete pipeline for enriching
-food classification datasets with nutritional information
-retrieved from the USDA FoodData Central API.
-
-The system integrates:
-- Local JSON caching
-- LLM-based semantic validation
-- Automatic dataset enrichment
+Paper reference:
+- Introduction section describing how Food-101, FruitVeg-81, and UECFood256
+  are enriched with structural nutritional information from USDA.
 """
 
 import argparse
@@ -114,10 +108,11 @@ class USDAFoodEnrichmentService:
         asker: AskFoodSearch,
         cache_file: str = "usda_cache.json"
     ) -> None:
-        """
-        Initialize the USDA enrichment service.
+        """Initialize the USDA enrichment service.
 
         Args:
+            # Paper dataset-construction stage: caching and resumability make
+            # the USDA acquisition step reproducible across long-running jobs.
             asker (AskFoodSearch): LLM validation client.
             cache_file (str): Path to local cache file.
         """

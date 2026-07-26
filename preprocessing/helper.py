@@ -1,3 +1,10 @@
+"""Preprocessing helpers for the food-image construction pipeline.
+
+Paper reference:
+- Dataset-construction section covering normalization, split creation,
+  balancing, merging, and dataset analysis before KG linkage.
+"""
+
 import csv
 import json
 import os
@@ -20,8 +27,25 @@ except ImportError:
     from dataset_splitter import DatasetSplitter
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolve_dataset_path(path_str: str) -> Path:
+    candidate = Path(path_str).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate.resolve()
+
+    project_candidate = (PROJECT_ROOT / candidate).resolve()
+    if project_candidate.exists():
+        return project_candidate
+
+    return candidate.resolve()
+
+
 def _list_dir_labels(path: str) -> List[str]:
-    dataset_path = Path(path)
+    dataset_path = _resolve_dataset_path(path)
     if not dataset_path.exists():
         return []
     return sorted(entry.name for entry in dataset_path.iterdir() if entry.is_dir())
@@ -33,6 +57,8 @@ class Helper:
         """
         Normalize a label into a clean identifier suitable for filenames, URLs, and IDs.
         """
+        # Paper pipeline: canonical labels are required before merging classes
+        # across datasets and before linking images to semantic descriptions.
         name = name.lower().strip()
 
         # Replace semantic symbols
@@ -836,18 +862,16 @@ class Helper:
         extensions=(".jpg", ".jpeg", ".png"),
         portion: float = 0.05,
     ) -> Dict:  # sourcery skip: low-code-quality
-        """
-        Analyze a food image dataset with a folder-per-class structure.
+        """Analyze a food image dataset with a folder-per-class structure.
 
-        Notes:
-        - total_images is computed on the full dataset
-        - image-level statistics are computed on a sampled subset if portion < 1.0
+        Paper reproducibility: summarize the image side of the merged dataset
+        and of the released excerpt in a consistent way.
         """
 
         if not (0 < portion <= 1.0):
             raise ValueError("portion must be in the range (0, 1].")
 
-        dataset_root = Path(dataset_root)
+        dataset_root = _resolve_dataset_path(dataset_root)
 
         stats = {
             "dataset_root": str(dataset_root),
@@ -877,11 +901,16 @@ class Helper:
 
         total_images_real = 0
 
+        split_paths = []
         for split in splits:
             split_path = dataset_root / split
-            if not split_path.exists():
-                continue
+            if split_path.exists():
+                split_paths.append((split, split_path))
 
+        if not split_paths:
+            split_paths = [("dataset", dataset_root)]
+
+        for split_name, split_path in split_paths:
             split_images = 0
             split_classes = 0
 
@@ -905,9 +934,6 @@ class Helper:
                 stats["images_per_class"].setdefault(class_name, 0)
                 stats["images_per_class"][class_name] += num_images_class
 
-                # --------------------------------------------------
-                # Sampling ONLY for image-level statistics
-                # --------------------------------------------------
                 sampled_images = images
                 if portion < 1.0 and images:
                     sample_size = max(1, int(len(images) * portion))
@@ -929,7 +955,7 @@ class Helper:
                     except Exception:
                         continue
 
-            stats["splits"][split] = {
+            stats["splits"][split_name] = {
                 "num_classes": split_classes,
                 "num_images": split_images,
             }

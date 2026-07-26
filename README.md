@@ -96,7 +96,7 @@ the mode argument can only take two values semantic(in case your dataset is UECF
       ```bash
       python inference/nutrient_generator.py \
     --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
     --output-file results/text-model/vision-model/no_rag/example.csv \
     --mode no_rag \
     --selective
@@ -105,31 +105,66 @@ the mode argument can only take two values semantic(in case your dataset is UECF
     ```bash
     python inference/nutrient_generator.py \
     --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
     --output-file results/text-model/vision-model/rag/example.csv \
     --mode rag \
     --selective
     ```
   - Case: Ablation Study
     ```bash
-    python inference/nutrient_generator.py \
+    python inference/ablation.py \
     --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
     --output-file results/text-model/vision-model/ablation/example.csv \
-    --mode no_rag \
     --selective \
-    --ablation \
     --rag-ratio 0.4
     ```
 
   - case: Baseline with clip-based approach(semantic searc)
     ```bash
-    python inference/nutrient_generator.py \
+    python inference/semantic_retrieval.py \
     --index-name example-index \
-    --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
+    --input-file dataset/multimodal/not_merged/test/example_test.jsonld \
     --output-file results/text-model/vision-model/semantic_search/example.csv \
-    --mode semantic_search
     ```
+
+### Using the released excerpt dataset
+
+When `excerpt_dataset/` has been generated, it can be reused across modules:
+
+- `excerpt_dataset/images` for image classification and dataset analysis
+- `excerpt_dataset/annotation.jsonld` for nutrient inference and evaluation
+
+Examples:
+
+```bash
+uv --project preprocessing run food-preprocessing analyze-layout \
+  --dataset-path excerpt_dataset/images
+```
+
+```bash
+uv --project inference run food-inference generate \
+  --index-name example-index \
+  --input-file excerpt_dataset/annotation.jsonld \
+  --output-file results/text-model/vision-model/excerpt_rag.csv \
+  --mode rag \
+  --selective
+```
+
+```bash
+uv --project inference run food-inference ablation \
+  --index-name example-index \
+  --input-file excerpt_dataset/annotation.jsonld \
+  --output-file results/text-model/vision-model/excerpt_ablation.csv \
+  --rag-ratio 0.2 \
+  --selective
+```
+
+```bash
+uv --project evaluation run food-evaluation \
+  --ground-json excerpt_dataset/annotation.jsonld \
+  --prediction-csv results/text-model/vision-model/excerpt_rag.csv
+```
 
 ## Retrieval
 This folder contains one folder one fold to get nutrient data from USDA 

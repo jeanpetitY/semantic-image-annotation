@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from inference import food_classifier, nutrient_generator
+from inference import ablation, food_classifier, nutrient_generator, semantic_retrieval
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +31,22 @@ def build_parser() -> argparse.ArgumentParser:
         if action.dest != "help":
             generate_parser._add_action(action)
 
+    semantic_parser = subparsers.add_parser(
+        "semantic-retrieval",
+        help="Run the semantic-retrieval baseline.",
+    )
+    for action in semantic_retrieval.build_parser()._actions:
+        if action.dest != "help":
+            semantic_parser._add_action(action)
+
+    ablation_parser = subparsers.add_parser(
+        "ablation",
+        help="Run the progressive RAG ablation study.",
+    )
+    for action in ablation.build_parser()._actions:
+        if action.dest != "help":
+            ablation_parser._add_action(action)
+
     return parser
 
 
@@ -51,6 +67,10 @@ def main(argv=None):
 
     if task == "classify":
         return food_classifier.main(forwarded_args)
+    if task == "semantic-retrieval":
+        return semantic_retrieval.main(forwarded_args)
+    if task == "ablation":
+        return ablation.main(forwarded_args)
 
     return nutrient_generator.main(forwarded_args)
 

@@ -1,3 +1,10 @@
+"""Balance image classes by downsampling or augmentation.
+
+Paper reference:
+- Experimental setup where partitions are balanced toward target class counts
+  after the leakage-safe split.
+"""
+
 import os
 import random
 import shutil
@@ -35,14 +42,15 @@ class DatasetBalancer:
         target: int = 1000,
         extensions=(".jpg", ".jpeg", ".png"),
     ):
-        """
-        Balance dataset by downsampling or augmentation.
+        """Balance dataset by downsampling or augmentation.
 
         Args:
             source_path (str): Path to input dataset.
             output_path (str): Path to balanced output dataset.
             target (int): Target number of images per class.(750 for train and 250 for test)
         """
+        # Paper setup: balancing happens after splitting so the reported class
+        # counts are reached without introducing cross-partition leakage.
         os.makedirs(output_path, exist_ok=True)
 
         for class_name in os.listdir(source_path):

@@ -1,3 +1,10 @@
+"""Export food resources and component statements from ORKG.
+
+Paper reference:
+- The semantically structured description layer stored in the Open Research
+  Knowledge Graph before linkage to the image side of the dataset.
+"""
+
 import argparse
 import json
 import os
@@ -72,14 +79,10 @@ def extract_literal_value(value):
 
 
 def parse_component_statements(component_id):
-    """
-    Retrieve and parse statements describing a food component (nutrient).
+    """Retrieve and parse statements describing a food component.
 
-    Args:
-        component_id (str): ORKG resource ID of the component.
-
-    Returns:
-        dict: Component information including name, value, and unit.
+    Paper KG-construction step: component entities provide the nutrient side of
+    the multimodal representation later linked to images.
     """
     statements = orkg.statements.get_by_subject(component_id)
 

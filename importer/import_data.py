@@ -1,3 +1,10 @@
+"""Import semantified food descriptions into ORKG.
+
+Paper reference:
+- Method section describing how food entities, ingredients, and nutrient
+  components are stored in ORKG before image linkage.
+"""
+
 import json
 import os
 import re
@@ -256,6 +263,8 @@ class USDAORKGImporter:
         start: int = 0,
         end: Optional[int] = None
     ) -> None:
+        # Paper KG-construction stage: iterate over enriched food records and
+        # populate ORKG with reusable food/component entities and statements.
 
         subset = self.dataset[start:end]
 

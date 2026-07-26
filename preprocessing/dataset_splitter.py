@@ -1,3 +1,10 @@
+"""Create leakage-safe train/test splits for image datasets.
+
+Paper reference:
+- Experimental setup where original images are partitioned before any
+  balancing or augmentation to prevent source-image leakage.
+"""
+
 import os
 import random
 import shutil
@@ -18,8 +25,7 @@ class DatasetSplitter:
         test_split: float = 0.25,
         extensions=(".jpg", ".jpeg", ".png"),
     ):
-        """
-        Create a train/test split from a dataset.
+        """Create a train/test split from a dataset.
 
         Args:
             dataset_path (str): Root dataset directory.
@@ -28,6 +34,8 @@ class DatasetSplitter:
             test_split (float): Ratio of test images.
             extensions (tuple): Allowed image extensions.
         """
+        # Paper setup: split first so that later transformed variants derived
+        # from one source image never cross train/validation/test boundaries.
         os.makedirs(train_path, exist_ok=True)
         os.makedirs(test_path, exist_ok=True)
 

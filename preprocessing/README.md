@@ -159,7 +159,15 @@ Analyze a dataset with image-level statistics:
 
 ```bash
 uv run food-preprocessing analyze-dataset \
-  --dataset-path dataset/image/merged \
+  --dataset-path dataset/image/merged/test \
+  --portion 0.05
+```
+
+The same command can be applied to the released excerpt image directory:
+
+```bash
+uv run food-preprocessing analyze-dataset \
+  --dataset-path excerpt_dataset/images \
   --portion 0.05
 ```
 
@@ -167,7 +175,7 @@ Analyze a dataset layout with the lightweight class-distribution analyzer:
 
 ```bash
 uv run food-preprocessing analyze-layout \
-  --dataset-path dataset/image/merged
+  --dataset-path excerpt_dataset/images
 ```
 
 If you prefer running from the repository root, use:
@@ -175,6 +183,10 @@ If you prefer running from the repository root, use:
 ```bash
 uv --project preprocessing run food-preprocessing --help
 ```
+
+The CLI resolves relative dataset paths against the repository root. After you
+generate an excerpt dataset, the same commands also work with
+`excerpt_dataset/images`.
 
 ## Outputs
 

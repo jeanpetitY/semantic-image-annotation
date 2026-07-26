@@ -1,3 +1,10 @@
+"""Food-recognition inference used before nutrient generation.
+
+Paper reference:
+- Experimental setup using the fine-tuned vision backbone for food recognition
+  on the semantified datasets.
+"""
+
 import argparse
 import json
 import os
@@ -12,6 +19,20 @@ if str(PROJECT_ROOT) not in sys.path:
 from inference.food_recognition import FoodClassifier
 
 
+def resolve_input_path(path_str: str) -> Path:
+    candidate = Path(path_str).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate.resolve()
+
+    project_candidate = (PROJECT_ROOT / candidate).resolve()
+    if project_candidate.exists():
+        return project_candidate
+
+    return candidate.resolve()
+
+
 class FoodEvaluator:
 
     def __init__(self, classifier: FoodClassifier):
@@ -20,14 +41,17 @@ class FoodEvaluator:
     # ------------------ Strict evaluation ------------------
 
     def evaluate(self, test_dir: str, limit: int = None):
+        # Paper: strict label evaluation corresponds to the reported food
+        # recognition metrics prior to nutrient generation.
         from datasets import load_dataset
         from sklearn.metrics import accuracy_score, f1_score
         from tqdm import tqdm
 
+        test_path = resolve_input_path(test_dir)
         print("Loading dataset...")
         ds = load_dataset(
             "imagefolder",
-            data_dir=test_dir,
+            data_dir=str(test_path),
             split="train"
         )
 
@@ -66,14 +90,17 @@ class FoodEvaluator:
     # ------------------ Semantic evaluation ------------------
 
     def evaluate_semantic(self, test_dir: str, limit: int = None):
+        # Paper ablation: semantic matching allows equivalent labels across
+        # datasets when strict string equality is too brittle.
         from datasets import load_dataset
         from sklearn.metrics import accuracy_score, f1_score
         from tqdm import tqdm
 
+        test_path = resolve_input_path(test_dir)
         print("Loading dataset...")
         ds = load_dataset(
             "imagefolder",
-            data_dir=test_dir,
+            data_dir=str(test_path),
             split="train"
         )
 
@@ -132,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-dir",
         type=str,
-        default=os.getenv("MODEL_DIR", "yvelos/dinov3-food-389-v1"),
+        default=os.getenv("MODEL_DIR", "anonymous-eval/food-recognition"),
         help="Local path or Hugging Face model identifier.",
     )
     parser.add_argument(

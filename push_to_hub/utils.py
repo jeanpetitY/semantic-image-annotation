@@ -1,3 +1,10 @@
+"""Publish fine-tuned food models as reproducibility artifacts.
+
+Paper reference:
+- Experimental pipeline where CLIP, BEiT, and DINOv3 checkpoints are released
+  alongside the code and semantified data.
+"""
+
 import os
 import argparse
 from pathlib import Path
@@ -9,7 +16,7 @@ from huggingface_hub import HfApi, create_repo, login
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_PATH = (
     PROJECT_ROOT
-    / "model_saved/finetuning/facebook-dinov3-vitl16-pretrain-lvd1689m/run 1: ep_8_0"
+    / "model_saved/finetuning/facebook-dinov3-vitl16-pretrain-lvd1689m/run 3: eps_8"
 )
 
 
@@ -21,6 +28,8 @@ def require_env(name: str) -> str:
 
 
 def detect_model_format(model_dir: Path) -> str:
+    # Paper reproducibility release: support both standard Hugging Face exports
+    # and the custom DINOv3 backbone-plus-classifier serialization.
     standard_required_files = [
         "config.json",
         "model.safetensors",
@@ -72,6 +81,8 @@ def push_model_to_hub(
     repo_name: str | None = None,
     private: bool | None = None,
 ) -> None:
+    # Paper supplementary material: publish only the stable model artifacts,
+    # excluding transient optimizer/checkpoint files from training.
     load_dotenv(PROJECT_ROOT / ".env")
 
     token = os.getenv("HUB_TOKEN") or os.getenv("HF_TOKEN")

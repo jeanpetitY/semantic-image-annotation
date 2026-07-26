@@ -1,7 +1,7 @@
 # Linkage Module
 
 This module links each food image to its associated textual food description and
-exports one ontology-style JSON object per line in JSONL format.
+exports a JSON-LD file containing ontology-style records.
 
 It is the dedicated module for image-text linkage.
 
@@ -55,7 +55,7 @@ In the intended pipeline, the source JSON file is the output produced by
 
 ## Output Format
 
-The module writes one ontology-style JSON object per line.
+The module writes a JSON-LD file as a single JSON array of records.
 
 Each linked image record includes:
 
@@ -86,21 +86,15 @@ Each linked component record includes:
 uv run food-linkage \
   --json-source ../json/new/data_retrieve_from_orkg.json \
   --image-dir ../dataset/image/not_merged/AFD/test \
-  --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonl
+  --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonld
 ```
-
-uv run food-linkage \
-  --json-source ../json/new/data_retrieve_from_orkg.json \
-  --image-dir ../dataset/image/not_merged/AFD/test \
-  --output-file ../dataset/multimodal/not_merged/test/AFD_test.jsonl
-
 From the repository root:
 
 ```bash
 uv --project linkage run food-linkage \
   --json-source json/new/data_retrieve_from_orkg.json \
   --image-dir dataset/image/not_merged/AFD/test \
-  --output-file dataset/multimodal/not_merged/test/AFD_test.jsonl
+  --output-file dataset/multimodal/not_merged/test/AFD_test.jsonld
 ```
 
 ## Textual Description Construction
@@ -118,4 +112,4 @@ the available metadata:
 - The linkage is deterministic for fixed source JSON content and fixed image
   directories.
 - Images are processed in sorted filename order inside each class directory.
-- Records are written incrementally in JSONL format, one line per image.
+- The output is written as a single JSON-LD array, which is easier to inspect in tools such as Protégé.

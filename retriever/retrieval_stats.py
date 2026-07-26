@@ -1,3 +1,10 @@
+"""Summarize retrieval coverage for enrichment steps.
+
+Paper reference:
+- Dataset-construction analysis used to inspect how many food labels were
+  successfully enriched before multimodal linkage.
+"""
+
 import argparse
 import json
 import os

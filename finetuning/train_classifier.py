@@ -1,3 +1,10 @@
+"""Fine-tune vision backbones for food recognition.
+
+Paper reference:
+- Experimental section reporting CLIP, BEiT, and DINOv3 fine-tuning on the
+  semantified food-image collections.
+"""
+
 import argparse
 import hashlib
 import inspect
@@ -95,6 +102,8 @@ class BackboneImageClassifier(nn.Module):
         self.loss_fn = nn.CrossEntropyLoss()
 
         if freeze_backbone:
+            # Paper ablation: this supports the classifier-head-only setting
+            # alongside the fully fine-tuned backbone configuration.
             for param in self.backbone.parameters():
                 param.requires_grad = False
 

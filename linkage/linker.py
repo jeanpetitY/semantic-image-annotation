@@ -1,3 +1,12 @@
+"""Link food images to KG-style semantic descriptions.
+
+Paper reference:
+- "An Approach for Image Annotation via Knowledge Graph Linkage"
+- The code below materializes the paper's image-to-KG linkage by converting
+  nutrient features into graph entities and attaching each image to its
+  semantic description.
+"""
+
 import json
 import re
 from pathlib import Path
@@ -36,6 +45,8 @@ class ImageTextLinker:
         return data
 
     def build_component_records(self, item: Dict, class_name: str) -> List[Dict]:
+        # Paper Eq. (1), semantic mapping Ψ: nutrient features are converted
+        # into explicit component entities before they are linked to an image.
         components = []
         source_name = item.get("food_name") or item.get("food_class") or class_name
         for nutrient in item.get("components", []):
@@ -81,6 +92,8 @@ class ImageTextLinker:
         return component_strings
 
     def build_text_description(self, item: Dict, component_strings: List[str]) -> str:
+        # Paper motivation: the image is linked to richer semantic context than
+        # a coarse label, so we preserve name, ingredients, and nutrients here.
         food_name = item.get("food_name") or item.get("description") or item.get("food_class", "")
         description_parts = [str(food_name).strip().rstrip(".")]
 
@@ -105,6 +118,8 @@ class ImageTextLinker:
         text_description: str,
         dataset_name: str,
     ) -> Dict:
+        # Paper Eq. (1): this is the concrete multimodal record linking an
+        # image instance in I to the semantic entities extracted for that food.
         record_id = f"{self.FOOD_NS}{class_name}_{dataset_name}_Img_{image_index}"
         record_type = f"{self.FOOD_NS}{class_name}_{dataset_name}_Images"
 
@@ -138,6 +153,8 @@ class ImageTextLinker:
         return record
 
     def iter_linked_records(self, json_source: str, image_dir: str) -> Iterable[Dict]:
+        # Paper pipeline: iterate jointly over semantic food metadata and image
+        # folders, then emit one linked record per image.
         source_records = self.load_source_records(json_source)
         image_root = Path(image_dir)
         dataset_name = self.clean_label(image_root.parent.name or "dataset")
@@ -172,14 +189,12 @@ class ImageTextLinker:
                     dataset_name=dataset_name,
                 )
 
-    def build_jsonl(self, json_source: str, image_dir: str, output_file: str) -> int:
+    def build_jsonld(self, json_source: str, image_dir: str, output_file: str) -> int:
         output_path = Path(output_file)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        count = 0
+        records = list(self.iter_linked_records(json_source, image_dir))
         with open(output_path, "w", encoding="utf-8") as file:
-            for record in self.iter_linked_records(json_source, image_dir):
-                file.write(json.dumps(record, ensure_ascii=False) + "\n")
-                count += 1
+            json.dump(records, file, ensure_ascii=False, indent=2)
 
-        return count
+        return len(records)

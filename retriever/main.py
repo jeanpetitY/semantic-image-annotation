@@ -1,3 +1,10 @@
+"""CLI entry point for data retrieval from USDA and ORKG.
+
+Paper reference:
+- The enrichment phase combines USDA-derived nutrient data and ORKG exports
+  before constructing the semantified multimodal dataset.
+"""
+
 import argparse
 import sys
 
@@ -22,8 +29,10 @@ def main():
     sys.argv = [sys.argv[0], *remaining]
 
     if args.task == "usda":
+        # USDA retrieval supports the nutrient-enrichment branch of the paper.
         return get_from_usda.main()
 
+    # ORKG export supports the structured-knowledge branch used before linkage.
     return get_from_orkg.main()
 
 

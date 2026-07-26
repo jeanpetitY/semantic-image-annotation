@@ -53,7 +53,7 @@ uv --project evaluation run food-evaluation --help
 
 The evaluator expects:
 
-- a ground-truth `.jsonl` file containing records with `label`, `image`, and `components`
+- a ground-truth `.jsonld` file containing records with `label`, `image`, and `components`
 - a prediction `.csv` file containing the columns `id`, `predicted_name`, and `components`
 
 The `id` field is aligned with the convention:
@@ -82,16 +82,33 @@ Standard evaluation:
 
 ```bash
 uv run food-evaluation \
-  --ground-json dataset/multimodal/not_merged/test/example_test.jsonl \
+  --ground-json dataset/multimodal/not_merged/test/example_test.jsonld \
   --prediction-csv results/text-model/vision-model/example.csv
+```
+
+Evaluation on the released excerpt dataset:
+
+```bash
+uv run food-evaluation \
+  --ground-json excerpt_dataset/annotation.jsonld \
+  --prediction-csv results/text-model/vision-model/excerpt_rag.csv
 ```
 
 Ablation evaluation:
 
 ```bash
 uv run food-evaluation \
-  --ground-json dataset/multimodal/not_merged/test/example_test.jsonl \
+  --ground-json dataset/multimodal/not_merged/test/example_test.jsonld \
   --prediction-csv results/text-model/vision-model/example.csv \
+  --is-ablation
+```
+
+Excerpt ablation evaluation:
+
+```bash
+uv run food-evaluation \
+  --ground-json excerpt_dataset/annotation.jsonld \
+  --prediction-csv results/text-model/vision-model/excerpt_ablation.csv \
   --is-ablation
 ```
 
@@ -99,7 +116,7 @@ Optional output path:
 
 ```bash
 uv run food-evaluation \
-  --ground-json dataset/multimodal/not_merged/test/example_test.jsonl \
+  --ground-json dataset/multimodal/not_merged/test/example_test.jsonld \
   --prediction-csv results/text-model/vision-model/example.csv \
   --output-file results/text-model/vision-model/example_evaluation_metrics.json
 ```
