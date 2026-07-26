@@ -62,6 +62,9 @@ The `id` field is aligned with the convention:
 <label> - <image>
 ```
 
+During evaluation, image paths inside `id` are normalized before matching.
+For example, `../dataset/...` and `dataset/...` are treated as the same image.
+
 The prediction `components` field may contain:
 
 - a list of strings such as `["protein: 10 g", "iron: 1.2 mg"]`
@@ -108,6 +111,17 @@ If `--output-file` is omitted, the evaluator writes:
 ```text
 <prediction_csv_dir>/<prediction_csv_stem>_evaluation_metrics.json
 ```
+
+When every aligned prediction is an abstention (`I don't know`), the evaluator
+reports:
+
+- `Abstention rate = 1.0`
+- `Answer rate = 0.0`
+- `Precision`, `Recall`, `F1-score`, `Jaccard`, `MAE`, and `Accuracy@10%` as
+  `null` in the JSON output
+
+This behavior avoids reporting misleading zeros when no effective nutrient
+comparison can be performed.
 
 ## Reproducibility Notes
 

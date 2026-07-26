@@ -9,12 +9,58 @@ from pathlib import Path
 import pandas as pd
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HAS_IMAGE_KEY = "http://example.org/food#hasImage"
 HAS_COMPONENTS_KEY = "http://example.org/food#hasComponent"
 HAS_TEXT_DESCRIPTION_KEY = "http://example.org/food#hasTextDescription"
 RDFS_LABEL_KEY = "http://www.w3.org/2000/01/rdf-schema#label"
 HAS_UNIT_KEY = "http://example.org/food#hasUnit"
 HAS_VALUE_KEY = "http://example.org/food#hasValue"
+
+
+def resolve_input_path(path_str: str) -> Path:
+    candidate = Path(path_str).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate.resolve()
+
+    project_candidate = (PROJECT_ROOT / candidate).resolve()
+    if project_candidate.exists():
+        return project_candidate
+
+    return candidate.resolve()
+
+
+def resolve_output_path(path_str: str) -> Path:
+    candidate = Path(path_str).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return (PROJECT_ROOT / candidate).resolve()
+
+
+def normalize_relative_image_path(path_str: str) -> str:
+    path_text = str(path_str).strip().replace("\\", "/")
+    while path_text.startswith("./"):
+        path_text = path_text[2:]
+    while path_text.startswith("../"):
+        path_text = path_text[3:]
+    return path_text
+
+
+def canonicalize_sample_id(sample_id: str) -> str:
+    text = str(sample_id).strip()
+    if " - " not in text:
+        return text.lower()
+
+    label, image_path = text.split(" - ", 1)
+    return f"{label.strip().lower()} - {normalize_relative_image_path(image_path).lower()}"
+
+
+def round_or_none(value, digits: int = 4):
+    if value is None:
+        return None
+    return round(value, digits)
 
 
 def _extract_first_value(value):
@@ -60,12 +106,12 @@ def _extract_label_from_jsonld_identifier(record: dict) -> str:
 
 
 def load_ground_truth_items(input_file: str) -> list[dict]:
-    input_path = Path(input_file)
+    input_path = resolve_input_path(input_file)
 
     if input_path.suffix.lower() == ".jsonl":
-        data = pd.read_json(input_file, lines=True).to_dict(orient="records")
+        data = pd.read_json(input_path, lines=True).to_dict(orient="records")
     else:
-        with open(input_file, "r", encoding="utf-8") as file:
+        with open(input_path, "r", encoding="utf-8") as file:
             data = json.load(file)
 
     if not isinstance(data, list):
@@ -144,7 +190,9 @@ class Evaluator:
     # ------------------ Loaders ------------------
 
     def make_sample_id(self, item):
-        return f"{item.get('label', '')} - {item.get('image', '')}"
+        label = str(item.get("label", "")).strip()
+        image = normalize_relative_image_path(item.get("image", ""))
+        return f"{label} - {image}"
 
     def load_ground_truth_records(self, json_path):
         data = load_ground_truth_items(json_path)
@@ -161,16 +209,17 @@ class Evaluator:
         return records
 
     def load_prediction_records(self, csv_path):
-        with open(csv_path, newline="", encoding="utf-8") as file:
+        resolved_csv_path = resolve_input_path(csv_path)
+        with open(resolved_csv_path, newline="", encoding="utf-8") as file:
             reader = csv.DictReader(file)
             if reader.fieldnames is None:
-                raise ValueError(f"Prediction CSV is empty: {csv_path}")
+                raise ValueError(f"Prediction CSV is empty: {resolved_csv_path}")
 
             required = {"id", "predicted_name", "components"}
             missing = required - set(reader.fieldnames)
             if missing:
                 raise ValueError(
-                    f"Prediction CSV is missing columns {sorted(missing)}: {csv_path}"
+                    f"Prediction CSV is missing columns {sorted(missing)}: {resolved_csv_path}"
                 )
 
             records = []
@@ -249,12 +298,12 @@ class Evaluator:
         return normalized_components
 
     def align_records(self, gt_records, pred_records):
-        gt_by_id = {record["id"]: record for record in gt_records}
+        gt_by_id = {canonicalize_sample_id(record["id"]): record for record in gt_records}
         aligned = []
         unmatched_predictions = 0
 
         for pred in pred_records:
-            gt = gt_by_id.get(pred["id"])
+            gt = gt_by_id.get(canonicalize_sample_id(pred["id"]))
             if gt is None:
                 unmatched_predictions += 1
                 continue
@@ -436,8 +485,14 @@ class Evaluator:
     # ------------------ Evaluation ------------------
 
     def evaluate(self, ground_json, prediction_csv, output_file=None, is_ablation=False):
-        gt_records = self.load_ground_truth_records(ground_json)
-        pred_records = self.load_prediction_records(prediction_csv)
+        resolved_ground_json = str(resolve_input_path(ground_json))
+        resolved_prediction_csv = str(resolve_input_path(prediction_csv))
+        resolved_output_file = (
+            str(resolve_output_path(output_file)) if output_file is not None else None
+        )
+
+        gt_records = self.load_ground_truth_records(resolved_ground_json)
+        pred_records = self.load_prediction_records(resolved_prediction_csv)
         aligned, unmatched_predictions = self.align_records(gt_records, pred_records)
 
         gt_component_sets, pred_component_sets = self.build_component_sets(
@@ -450,6 +505,17 @@ class Evaluator:
             pred_component_sets,
         )
         mae, value_acc, unit_mismatches, value_pairs = self.value_metrics(aligned)
+        abstention_rate = self.abstention_rate(aligned)
+        answer_rate = 1 - abstention_rate
+        jaccard = self.mean_jaccard(gt_component_sets, pred_component_sets)
+
+        if abstention_rate == 1.0:
+            precision = None
+            recall = None
+            f1 = None
+            jaccard = None
+            mae = None
+            value_acc = None
 
         results = {
             "Evaluation mode": "ablation" if is_ablation else "standard",
@@ -459,25 +525,22 @@ class Evaluator:
             "Predictions available": len(pred_records),
             "Prediction coverage": round(len(aligned) / len(gt_records), 4) if gt_records else 0.0,
             "Food accuracy": round(self.food_accuracy(aligned), 4),
-            "Precision": round(precision, 4),
-            "Recall": round(recall, 4),
-            "F1-score": round(f1, 4),
-            "Jaccard": round(
-                self.mean_jaccard(gt_component_sets, pred_component_sets),
-                4,
-            ),
-            "MAE": round(mae, 4),
-            "Accuracy@10%": round(value_acc, 4),
-            "Abstention rate": round(self.abstention_rate(aligned), 4),
-            "Answer rate": round(1 - self.abstention_rate(aligned), 4),
+            "Precision": round_or_none(precision),
+            "Recall": round_or_none(recall),
+            "F1-score": round_or_none(f1),
+            "Jaccard": round_or_none(jaccard),
+            "MAE": round_or_none(mae),
+            "Accuracy@10%": round_or_none(value_acc),
+            "Abstention rate": round(abstention_rate, 4),
+            "Answer rate": round(answer_rate, 4),
         }
 
         results["Output file"] = self.save_results(
             results,
-            prediction_csv,
-            output_file,
+            resolved_prediction_csv,
+            resolved_output_file,
         )
-        self.save_results(results, prediction_csv, results["Output file"])
+        self.save_results(results, resolved_prediction_csv, results["Output file"])
 
         return results
 
