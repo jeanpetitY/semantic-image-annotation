@@ -9,8 +9,8 @@ Both tasks can be launched from the unified entrypoint [`main.py`](main.py).
 
 ## Prerequisites
 
-- **Python 3.14+** — the project includes a `.python-version` file for tool compatibility
-- **[uv](https://docs.astral.sh/uv/)** — used as the package manager, build system, and script runner
+- **Python 3.12** — this module includes a `.python-version` file pinned to `3.12`
+- **[uv](https://docs.astral.sh/uv/)** — used to create and run the module environment
 - **Conda environment `inference_env`** — used for the cluster jobs
 - **GPU access** — the recommended Slurm configuration uses one 24 GB GPU with `48G` host memory
 
@@ -18,10 +18,36 @@ Both tasks can be launched from the unified entrypoint [`main.py`](main.py).
 
 The nutrient-generation pipeline depends on authenticated services. Set the following variables before running:
 
-- `HUB_TOKEN`
+- `HUB_TOKEN` — required when using gated or private Hugging Face models; optional otherwise
 - `PINECONE_API_KEY`
 
 If a `.env` file is used, it should define at least these variables.
+
+## Setup With uv
+
+Go into the module folder:
+
+```bash
+cd inference
+```
+
+Install or synchronize the module environment:
+
+```bash
+uv sync
+```
+
+For exact dependency reproduction, prefer:
+
+```bash
+uv sync --frozen
+```
+
+Show CLI help:
+
+```bash
+uv run food-inference --help
+```
 
 ## Unified Entrypoint
 
@@ -30,7 +56,7 @@ If a `.env` file is used, it should define at least these variables.
 Semantic evaluation:
 
 ```bash
-python inference/main.py classify \
+uv run food-inference classify \
   --model-dir org/dinov3-food-model \
   --test-dir dataset/image/not_merged/AFD/test \
   --mode semantic
@@ -39,7 +65,7 @@ python inference/main.py classify \
 Strict evaluation:
 
 ```bash
-python inference/main.py classify \
+uv run food-inference classify \
   --model-dir org/dinov3-food-model \
   --test-dir dataset/image/not_merged/AFD/test \
   --mode strict
@@ -59,7 +85,7 @@ Default output:
 Example with RAG and selective prompting:
 
 ```bash
-python inference/main.py generate \
+uv run food-inference generate \
   --index-name example-index \
   --input-file dataset/multimodal/not_merged/test/example_test.jsonl \
   --output-file results/text-model/vision-model/example.csv \
@@ -109,3 +135,9 @@ TASK=classify sbatch inference/run_inference_sbatch.sh \
 - Classification outputs are saved as JSON files.
 - Nutrient-generation outputs are saved as CSV files.
 - Exact reruns require the same model identifiers, input files, environment variables, and resource configuration.
+
+If you prefer running from the repository root, use:
+
+```bash
+uv --project inference run food-inference --help
+```
